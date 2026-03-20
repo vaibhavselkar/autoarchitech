@@ -14,12 +14,28 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
-const allowedOrigins = process.env.FRONTEND_URL
-  ? [process.env.FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3004']
-  : true;
+// Middleware — CORS
+const DEV_ORIGINS = ['http://localhost:3000', 'http://localhost:3004', 'http://localhost:5173'];
 
-app.use(cors({ origin: allowedOrigins, credentials: true }));
+// FRONTEND_URL can be a single URL or comma-separated list
+const envOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map(u => u.trim()).filter(Boolean)
+  : [];
+
+const allowedOrigins = [...envOrigins, ...DEV_ORIGINS];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (server-to-server, curl, mobile)
+    if (!origin) return callback(null, true);
+    // Allow if explicitly listed
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    // Allow all *.vercel.app preview deployments
+    if (origin.endsWith('.vercel.app')) return callback(null, true);
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
