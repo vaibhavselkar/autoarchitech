@@ -61,6 +61,20 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const loginWithGoogle = async (credential) => {
+    try {
+      const response = await api.post('/auth/google', { credential });
+      const { token, user: userData } = response.data.data;
+      localStorage.setItem('token', token);
+      setUser(userData);
+      toast.success('Signed in with Google!');
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Google sign-in failed');
+      return false;
+    }
+  };
+
   const logout = () => {
     localStorage.removeItem('token');
     setUser(null);
@@ -71,6 +85,7 @@ export function AuthProvider({ children }) {
     user,
     login,
     register,
+    loginWithGoogle,
     logout,
     loading
   };

@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import PlanResults from './pages/PlanResults';
@@ -35,6 +36,7 @@ function ProtectedRoute({ children }) {
 
 function App() {
   return (
+    <GoogleOAuthProvider clientId={process.env.REACT_APP_GOOGLE_CLIENT_ID || ''}>
     <Router>
       <AuthProvider>
         <Fragment>
@@ -72,6 +74,7 @@ function App() {
         </Fragment>
       </AuthProvider>
     </Router>
+    </GoogleOAuthProvider>
   );
 }
 

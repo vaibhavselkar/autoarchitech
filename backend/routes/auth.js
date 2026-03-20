@@ -1,10 +1,13 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const dotenv = require('dotenv');
 dotenv.config();
 const router = express.Router();
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Single source of truth for JWT secret
 const JWT_SECRET = process.env.JWT_SECRET || 'Banayengakyaghartoiskojaldistemaalkr';
@@ -155,6 +158,61 @@ router.get('/profile', async (req, res) => {
       success: false,
       message: 'Internal server error'
     });
+  }
+});
+
+// Google OAuth — verify ID token from frontend, return our JWT
+router.post('/google', async (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) {
+      return res.status(400).json({ success: false, message: 'Google credential is required' });
+    }
+
+    // Verify the Google ID token
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, name, picture } = payload;
+
+    // Find or create user
+    let user = await User.findOne({ $or: [{ googleId }, { email }] });
+
+    if (user) {
+      // Existing user — update Google fields if missing
+      if (!user.googleId) {
+        user.googleId = googleId;
+        user.authProvider = 'google';
+        user.profilePicture = user.profilePicture || picture;
+        await user.save();
+      }
+    } else {
+      // New user via Google
+      user = new User({
+        name,
+        email,
+        googleId,
+        authProvider: 'google',
+        profilePicture: picture,
+      });
+      await user.save();
+    }
+
+    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
+
+    res.json({
+      success: true,
+      message: 'Google login successful',
+      data: {
+        token,
+        user: { id: user._id, name: user.name, email: user.email, profilePicture: user.profilePicture },
+      },
+    });
+  } catch (error) {
+    console.error('Google auth error:', error);
+    res.status(401).json({ success: false, message: 'Invalid Google credential' });
   }
 });
 
