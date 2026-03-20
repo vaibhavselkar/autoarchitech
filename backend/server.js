@@ -43,16 +43,34 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ── Database ──────────────────────────────────────────────────────────────────
+// On serverless, module state may be lost between invocations.
+// connectDB() is called as middleware so every request ensures a live connection.
 let cachedConn = null;
 async function connectDB() {
-  if (cachedConn && mongoose.connection.readyState === 1) return cachedConn;
-  cachedConn = await mongoose.connect(
-    process.env.MONGODB_URI || 'mongodb://localhost:27017/autoarchitect'
-  );
+  if (mongoose.connection.readyState === 1) return; // already connected
+  if (cachedConn) return cachedConn;                // connection in progress
+
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error('MONGODB_URI environment variable is not set');
+
+  cachedConn = await mongoose.connect(uri, {
+    serverSelectionTimeoutMS: 8000,
+    socketTimeoutMS: 45000,
+  });
   console.log('MongoDB connected');
   return cachedConn;
 }
-connectDB().catch(err => console.error('MongoDB connection error:', err));
+
+// Middleware: ensure DB is connected before every API request
+app.use('/api', async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('DB connection failed:', err.message);
+    res.status(503).json({ error: 'Database unavailable', message: err.message });
+  }
+});
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
