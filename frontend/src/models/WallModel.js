@@ -75,7 +75,6 @@ export function renderWallSVG(wall, mmToPxFn, fillColor = '#444') {
 export function buildHatch45(x, y, w, h, spacing = 6) {
   if (spacing < 1) spacing = 6;
   const paths = [];
-  const total = w + h;
   for (let d = -h; d < w; d += spacing) {
     const x1 = x + Math.max(0, d);
     const y1 = y + Math.max(0, -d);

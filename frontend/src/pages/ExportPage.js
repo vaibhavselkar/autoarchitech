@@ -11,21 +11,20 @@ const ExportPage = () => {
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
+    const fetchPlan = async () => {
+      setLoading(true);
+      try {
+        const response = await api.get(`/plans/${planId}`);
+        setPlan(response.data.data.plan);
+      } catch (error) {
+        toast.error('Failed to fetch plan');
+        navigate('/results');
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchPlan();
-  }, [planId]);
-
-  const fetchPlan = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get(`/plans/${planId}`);
-      setPlan(response.data.data.plan);
-    } catch (error) {
-      toast.error('Failed to fetch plan');
-      navigate('/results');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [planId, navigate]);
 
   const handleExport = async (format) => {
     setExporting(true);

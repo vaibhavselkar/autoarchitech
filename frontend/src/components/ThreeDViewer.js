@@ -216,12 +216,13 @@ const ThreeDViewer = ({ layout }) => {
 
     setIsLoaded(true);
 
+    const mountNode = mountRef.current;
     return () => {
       window.removeEventListener('resize', onResize);
       cancelAnimationFrame(animRef.current);
       renderer.dispose();
-      if (mountRef.current && renderer.domElement.parentNode === mountRef.current) {
-        mountRef.current.removeChild(renderer.domElement);
+      if (mountNode && renderer.domElement.parentNode === mountNode) {
+        mountNode.removeChild(renderer.domElement);
       }
     };
   }, [layout]);

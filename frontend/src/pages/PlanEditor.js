@@ -13,21 +13,20 @@ const PlanEditor = () => {
   const [tool, setTool] = useState('select'); // select, add-room, add-door, add-window
 
   useEffect(() => {
+    const fetchPlan = async () => {
+      setLoading(true);
+      try {
+        const response = await api.get(`/plans/${planId}`);
+        setPlan(response.data.data.plan);
+      } catch (error) {
+        toast.error('Failed to fetch plan');
+        navigate('/results');
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchPlan();
-  }, [planId]);
-
-  const fetchPlan = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get(`/plans/${planId}`);
-      setPlan(response.data.data.plan);
-    } catch (error) {
-      toast.error('Failed to fetch plan');
-      navigate('/results');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [planId, navigate]);
 
   const handleSave = async () => {
     setLoading(true);
