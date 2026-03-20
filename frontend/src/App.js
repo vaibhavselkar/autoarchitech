@@ -34,9 +34,11 @@ function ProtectedRoute({ children }) {
   return user ? children : <Navigate to="/" replace />;
 }
 
+const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || 'placeholder';
+
 function App() {
   return (
-    <GoogleOAuthProvider clientId={process.env.REACT_APP_GOOGLE_CLIENT_ID || ''}>
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
     <Router>
       <AuthProvider>
         <Fragment>

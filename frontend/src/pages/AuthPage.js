@@ -30,6 +30,8 @@ const AuthPage = () => {
     setLoading(false);
   };
 
+  const googleEnabled = Boolean(process.env.REACT_APP_GOOGLE_CLIENT_ID);
+
   const handleGoogleSuccess = async (credentialResponse) => {
     const ok = await loginWithGoogle(credentialResponse.credential);
     if (ok) navigate('/home');
@@ -66,27 +68,31 @@ const AuthPage = () => {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl shadow-black/40">
 
           {/* Google sign-in */}
-          <div className="flex justify-center mb-6">
-            <GoogleLogin
-              onSuccess={handleGoogleSuccess}
-              onError={() => toast.error('Google sign-in failed')}
-              theme="filled_black"
-              shape="rectangular"
-              size="large"
-              text={isLogin ? 'signin_with' : 'signup_with'}
-              width="100%"
-            />
-          </div>
+          {googleEnabled && (
+            <>
+              <div className="flex justify-center mb-6">
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={() => toast.error('Google sign-in failed')}
+                  theme="filled_black"
+                  shape="rectangular"
+                  size="large"
+                  text={isLogin ? 'signin_with' : 'signup_with'}
+                  width="340"
+                />
+              </div>
 
-          {/* Divider */}
-          <div className="relative mb-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-700" />
-            </div>
-            <div className="relative flex justify-center">
-              <span className="bg-slate-900 px-3 text-slate-500 text-xs">or continue with email</span>
-            </div>
-          </div>
+              {/* Divider */}
+              <div className="relative mb-6">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-700" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-slate-900 px-3 text-slate-500 text-xs">or continue with email</span>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Email form */}
           <form onSubmit={handleSubmit} className="space-y-4">
