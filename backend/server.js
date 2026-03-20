@@ -14,32 +14,35 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware — CORS
+// ── CORS ──────────────────────────────────────────────────────────────────────
+// Uses Bearer tokens (not cookies) so credentials: false is safe.
+// Allows all *.vercel.app preview URLs automatically.
 const DEV_ORIGINS = ['http://localhost:3000', 'http://localhost:3004', 'http://localhost:5173'];
 
-// FRONTEND_URL can be a single URL or comma-separated list
 const envOrigins = process.env.FRONTEND_URL
   ? process.env.FRONTEND_URL.split(',').map(u => u.trim()).filter(Boolean)
   : [];
 
-const allowedOrigins = [...envOrigins, ...DEV_ORIGINS];
-
-app.use(cors({
+const CORS_OPTIONS = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (server-to-server, curl, mobile)
-    if (!origin) return callback(null, true);
-    // Allow if explicitly listed
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    // Allow all *.vercel.app preview deployments
-    if (origin.endsWith('.vercel.app')) return callback(null, true);
-    callback(new Error(`CORS: origin ${origin} not allowed`));
+    if (!origin) return callback(null, true);                      // server-to-server / curl
+    if (origin.endsWith('.vercel.app')) return callback(null, true); // all vercel deployments
+    if ([...envOrigins, ...DEV_ORIGINS].includes(origin)) return callback(null, true);
+    callback(null, false); // silently reject (don't throw — prevents 500 on preflight)
   },
-  credentials: true,
-}));
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false,
+};
+
+// Handle OPTIONS preflight for every route FIRST, before any other middleware
+app.options('*', cors(CORS_OPTIONS));
+app.use(cors(CORS_OPTIONS));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Database connection — cached for serverless environments
+// ── Database ──────────────────────────────────────────────────────────────────
 let cachedConn = null;
 async function connectDB() {
   if (cachedConn && mongoose.connection.readyState === 1) return cachedConn;
@@ -51,34 +54,24 @@ async function connectDB() {
 }
 connectDB().catch(err => console.error('MongoDB connection error:', err));
 
-// Routes
+// ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/plans', planRoutes);
 app.use('/api/ai', aiRoutes);
 
-// Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    message: 'AutoArchitect Backend is running',
-    timestamp: new Date().toISOString()
-  });
+  res.json({ status: 'ok', message: 'AutoArchitect Backend is running', timestamp: new Date().toISOString() });
 });
 
-// Error handling middleware
+// ── Error handler ─────────────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({
-    error: 'Something went wrong!',
-    message: err.message
-  });
+  res.status(500).json({ error: 'Something went wrong!', message: err.message });
 });
 
-// Start server only outside Vercel (local dev)
+// ── Local dev server ──────────────────────────────────────────────────────────
 if (!process.env.VERCEL) {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 }
 
 module.exports = app;
