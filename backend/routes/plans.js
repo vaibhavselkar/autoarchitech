@@ -1,4 +1,5 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const Plan = require('../models/Plan');
 const Plot = require('../models/Plot');
 const { generateLayout, generateLayoutVariations } = require('../services/layoutGenerator');
@@ -18,7 +19,7 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'Banayengakyaghartoiskojaldistemaalkr');
     req.userId = decoded.userId;
     next();
   } catch (error) {
@@ -47,6 +48,30 @@ router.post('/generate', authMiddleware, async (req, res) => {
       });
     }
 
+    // First, save the plot if it doesn't exist
+    let plotId = null;
+    if (plot) {
+      // Check if plot already exists for this user
+      let existingPlot = await Plot.findOne({ 
+        userId: req.userId,
+        width: plot.width,
+        length: plot.length,
+        facing: plot.facing
+      });
+      
+      if (!existingPlot) {
+        // Create new plot
+        const newPlot = new Plot({
+          ...plot,
+          userId: req.userId
+        });
+        await newPlot.save();
+        plotId = newPlot._id;
+      } else {
+        plotId = existingPlot._id;
+      }
+    }
+
     // Generate multiple layout variations using enhanced AI and rule-based methods
     const layouts = await generateLayoutVariations(plot, requirements, preferences, variations);
 
@@ -56,7 +81,7 @@ router.post('/generate', authMiddleware, async (req, res) => {
       const layout = layouts[i];
       const plan = new Plan({
         userId: req.userId,
-        plotId: null, // Will be set if plot is saved
+        plotId: plotId, // Use the saved plot ID
         layoutJson: layout,
         title: `AI-Enhanced Plan ${i + 1}`,
         description: layout.metadata?.generator === 'ai-enhanced' 

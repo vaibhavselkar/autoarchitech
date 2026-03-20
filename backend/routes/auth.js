@@ -2,15 +2,25 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-
+const dotenv = require('dotenv');
+dotenv.config();
 const router = express.Router();
+
+// Single source of truth for JWT secret
+const JWT_SECRET = process.env.JWT_SECRET || 'Banayengakyaghartoiskojaldistemaalkr';
 
 // Register a new user
 router.post('/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    // Check if user already exists
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email and password are required'
+      });
+    }
+
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ 
@@ -19,19 +29,12 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    // Create new user
-    const user = new User({
-      name,
-      email,
-      password
-    });
-
+    const user = new User({ name, email, password });
     await user.save();
 
-    // Generate JWT token
     const token = jwt.sign(
       { userId: user._id },
-      process.env.JWT_SECRET || 'your-secret-key',
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -62,8 +65,14 @@ router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Find user by email
-    const user = await User.findOne({ email });
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and password are required'
+      });
+    }
+
+    const user = await User.findOne({ email }).select('+password');
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -71,7 +80,6 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Check password
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(401).json({
@@ -80,10 +88,9 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Generate JWT token
     const token = jwt.sign(
       { userId: user._id },
-      process.env.JWT_SECRET || 'your-secret-key',
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -121,7 +128,7 @@ router.get('/profile', async (req, res) => {
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    const decoded = jwt.verify(token, JWT_SECRET);
     const user = await User.findById(decoded.userId).select('-password');
 
     if (!user) {
@@ -133,13 +140,17 @@ router.get('/profile', async (req, res) => {
 
     res.json({
       success: true,
-      data: {
-        user
-      }
+      data: { user }
     });
 
   } catch (error) {
     console.error('Profile error:', error);
+    if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired token'
+      });
+    }
     res.status(500).json({
       success: false,
       message: 'Internal server error'

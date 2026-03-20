@@ -1,4 +1,5 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const Plan = require('../models/Plan');
 const geminiService = require('../services/geminiService');
 
@@ -16,7 +17,7 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'Banayengakyaghartoiskojaldistemaalkr');
     req.userId = decoded.userId;
     next();
   } catch (error) {

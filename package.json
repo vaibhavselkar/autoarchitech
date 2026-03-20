@@ -1,0 +1,25 @@
+{
+  "name": "autoarchitect",
+  "version": "1.0.0",
+  "description": "AutoArchitect - AI-powered architectural design platform",
+  "private": true,
+  "scripts": {
+    "frontend:install": "cd frontend && npm install",
+    "frontend:start": "cd frontend && npm start",
+    "frontend:start:port3001": "cd frontend && set PORT=3001 && npm start",
+    "frontend:build": "cd frontend && npm run build",
+    "backend:install": "cd backend && npm install",
+    "backend:start": "cd backend && npm start",
+    "dev": "concurrently \"npm run backend:start\" \"npm run frontend:start\"",
+    "install:all": "npm run backend:install && npm run frontend:install"
+  },
+  "devDependencies": {
+    "concurrently": "^7.6.0"
+  },
+  "dependencies": {
+    "axios": "^1.13.6",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.1"
+  }
+}

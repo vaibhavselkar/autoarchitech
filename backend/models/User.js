@@ -60,19 +60,31 @@ const userSchema = new mongoose.Schema({
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
+  console.log('Save hook triggered, isModified password:', this.isModified('password'));
+  console.log('Password value:', this.password);
+  
+  if (!this.isModified('password')) {
+    console.log('Password not modified, skipping hash');
+    return next();
+  }
   
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
+    console.log('Password hashed successfully');
     next();
   } catch (error) {
+    console.error('Password hashing error:', error);
     next(error);
   }
 });
 
 // Compare password method
 userSchema.methods.comparePassword = async function(candidatePassword) {
+  // If user registered with Google OAuth, they don't have a password
+  if (!this.password) {
+    return false;
+  }
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
