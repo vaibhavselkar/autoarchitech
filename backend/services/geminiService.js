@@ -2,488 +2,328 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { planUtils } = require('../../shared/plan-schema');
 
 /**
- * Gemini AI Service for advanced floor plan generation and design enhancement
- * Uses Google's Gemini API for architectural design intelligence
+ * Gemini AI Service  v2.0
+ *
+ * AI-FIRST approach:
+ *   Gemini now produces complete room layouts (x, y, width, height per room).
+ *   The layoutGenerator uses these coordinates directly.
+ *   Rule-based fallback only when Gemini fails or produces invalid output.
  */
 class GeminiService {
   constructor() {
     this.apiKey = process.env.GEMINI_API_KEY;
-    this.modelName = 'gemini-pro';
-    this.visionModelName = 'gemini-pro-vision';
-    
+    this.modelName = 'gemini-1.5-flash';
+
     if (this.apiKey) {
       this.genAI = new GoogleGenerativeAI(this.apiKey);
       this.model = this.genAI.getGenerativeModel({ model: this.modelName });
     }
   }
 
-  /**
-   * Check if Gemini is configured
-   */
   isConfigured() {
     return !!this.apiKey && !!this.genAI;
   }
 
-  /**
-   * Generate enhanced floor plans using Gemini AI
-   * @param {Object} plot - Plot dimensions and constraints
-   * @param {Object} requirements - Room requirements
-   * @param {Object} preferences - User preferences
-   * @param {number} variations - Number of variations to generate
-   * @returns {Promise<Array>} Enhanced layouts
-   */
-  async generateAIFloorPlans(plot, requirements, preferences, variations = 5) {
-    if (!this.isConfigured()) {
-      console.log('Gemini AI not configured, using rule-based generation');
-      return null;
-    }
-
-    try {
-      const prompt = this.createGenerationPrompt(plot, requirements, preferences, variations);
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-
-      // Parse the AI-generated layouts
-      return this.parseAIGeneratedLayouts(text, plot, requirements);
-      
-    } catch (error) {
-      console.error('Gemini AI generation failed:', error);
-      return null;
-    }
-  }
+  // ─── PRIMARY: AI generates complete room placements ───────────────────────
 
   /**
-   * Refine existing layout with AI suggestions
-   * @param {Object} layout - Current layout
-   * @param {Object} requirements - User requirements
-   * @returns {Promise<Object>} Refined layout
+   * Ask Gemini to produce `count` complete floor plan layouts.
+   * Each layout is an array of rooms with exact x, y, width, height.
+   * Returns array of variation objects, or null on failure.
    */
-  async refineLayoutWithGemini(layout, requirements) {
-    if (!this.isConfigured()) {
-      return layout;
-    }
+  async generateRoomPlacements(plot, requirements, preferences, count) {
+    if (!this.isConfigured()) return null;
 
-    try {
-      const prompt = this.createRefinementPrompt(layout, requirements);
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const suggestions = response.text();
+    const bW = Math.round(plot.width  - (plot.setback?.left || 4) - (plot.setback?.right || 4));
+    const bL = Math.round(plot.length - (plot.setback?.front || 6) - (plot.setback?.back  || 4));
+    const facing = (plot.facing || 'north').toLowerCase();
+    const req = requirements;
+    const prefs = preferences || {};
 
-      return this.applyGeminiSuggestions(layout, suggestions);
-      
-    } catch (error) {
-      console.error('Gemini AI refinement failed:', error);
-      return layout;
-    }
-  }
+    // Build the list of rooms the user needs
+    const roomList = this._buildRoomList(req, bW, bL);
 
-  /**
-   * Analyze layout quality and provide AI recommendations
-   * @param {Object} layout - Floor plan layout
-   * @returns {Promise<Object>} Analysis results
-   */
-  async analyzeLayoutQuality(layout) {
-    if (!this.isConfigured()) {
-      return this.getBasicAnalysis(layout);
-    }
-
-    try {
-      const prompt = this.createAnalysisPrompt(layout);
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const analysis = response.text();
-
-      return this.parseQualityAnalysis(analysis, layout);
-      
-    } catch (error) {
-      console.error('Gemini AI analysis failed:', error);
-      return this.getBasicAnalysis(layout);
-    }
-  }
-
-  /**
-   * Generate design concepts and styles
-   * @param {Object} requirements - User requirements
-   * @param {Object} preferences - User preferences
-   * @returns {Promise<Array>} Design concepts
-   */
-  async generateDesignConcepts(requirements, preferences) {
-    if (!this.isConfigured()) {
-      return this.getDefaultConcepts(requirements, preferences);
-    }
-
-    try {
-      const prompt = this.createConceptPrompt(requirements, preferences);
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const concepts = response.text();
-
-      return this.parseDesignConcepts(concepts);
-      
-    } catch (error) {
-      console.error('Gemini AI concepts failed:', error);
-      return this.getDefaultConcepts(requirements, preferences);
-    }
-  }
-
-  /**
-   * Create prompt for floor plan generation
-   */
-  createGenerationPrompt(plot, requirements, preferences, variations) {
-    const plotDetails = `
-Plot Information:
-- Size: ${plot.width}' x ${plot.length}'
-- Facing: ${plot.facing}
-- Setbacks: Front ${plot.setback?.front || 6}', Back ${plot.setback?.back || 4}', Sides ${plot.setback?.left || 4}'`;
-
-    const roomRequirements = `
-Room Requirements:
-${this.formatRequirements(requirements)}`;
-
-    const userPreferences = `
-User Preferences:
-${this.formatPreferences(preferences)}`;
-
-    return `
-You are an expert AI architect and interior designer. Generate ${variations} innovative and practical floor plan concepts for a residential building.
-
-${plotDetails}
-
-${roomRequirements}
-
-${userPreferences}
-
-Please provide detailed floor plan descriptions including:
-1. Room layout and positioning
-2. Flow and circulation patterns
-3. Natural light optimization
-4. Space utilization efficiency
-5. Architectural style elements
-6. Functional zoning
-
-For each concept, provide:
-- Overall layout strategy
-- Room-by-room specifications (dimensions, positioning)
-- Key design features
-- Space optimization techniques
-- Architectural highlights
-
-Focus on creating modern, functional, and aesthetically pleasing designs that maximize the available space while maintaining architectural integrity and user comfort.
-`;
-  }
-
-  /**
-   * Create prompt for layout refinement
-   */
-  createRefinementPrompt(layout, requirements) {
-    const currentLayout = `
-Current Layout Analysis:
-- Plot: ${layout.plot.width}' x ${layout.plot.length}' facing ${layout.plot.facing}
-- Total Rooms: ${layout.rooms.length}
-- Room Breakdown: ${layout.rooms.map(r => `${r.type}: ${r.width}'x${r.height}'`).join(', ')}
-- Space Utilization: ${planUtils.calculateUtilization(layout).toFixed(1)}%`;
-
-    const requirementsText = `
-User Requirements:
-${this.formatRequirements(requirements)}`;
-
-    return `
-You are an expert architect. Analyze and improve this floor plan layout:
-
-${currentLayout}
-
-${requirementsText}
-
-Please provide specific improvements for:
-1. Room placement optimization
-2. Traffic flow enhancement
-3. Natural light and ventilation improvements
-4. Space utilization efficiency
-5. Architectural harmony
-6. Functional layout adjustments
-
-Provide actionable suggestions with specific measurements and positioning changes. Focus on practical, buildable improvements that enhance both functionality and aesthetic appeal.
-`;
-  }
-
-  /**
-   * Create prompt for layout quality analysis
-   */
-  createAnalysisPrompt(layout) {
-    const layoutDetails = `
-Layout Analysis:
-- Plot Size: ${layout.plot.width}' x ${layout.plot.length}' (${(layout.plot.width * layout.plot.length).toFixed(0)} sq ft)
-- Facing Direction: ${layout.plot.facing}
-- Setbacks: Front ${layout.plot.setback?.front || 6}', Back ${layout.plot.setback?.back || 4}', Sides ${layout.plot.setback?.left || 4}'
-- Total Rooms: ${layout.rooms.length}
-- Total Built Area: ${planUtils.calculateBuiltUpArea(layout).toFixed(0)} sq ft
-- Space Utilization: ${planUtils.calculateUtilization(layout).toFixed(1)}%
-
-Room Details:
-${layout.rooms.map((room, i) => `${i + 1}. ${room.type}: ${room.width}' x ${room.height}' at position (${room.x}', ${room.y}')`).join('\n')}
-
-Wall and Structure:
-- Total Walls: ${layout.walls?.length || 0}
-- Doors: ${layout.doors?.length || 0}
-- Windows: ${layout.windows?.length || 0}`;
-
-    return `
-Perform a comprehensive architectural analysis of this floor plan:
-
-${layoutDetails}
-
-Evaluate based on these criteria (score 1-10 for each):
-1. Space Utilization Efficiency
-2. Room Proportions and Sizing
-3. Traffic Flow and Circulation
-4. Natural Light Optimization
-5. Functional Zoning
-6. Architectural Harmony
-7. Structural Integrity
-8. Buildability and Construction Practicality
-
-Provide:
-- Overall quality score (1-100)
-- Strengths of the current design
-- Specific areas for improvement
-- Actionable recommendations with measurements
-- Alternative layout suggestions if applicable
-
-Focus on professional architectural standards and practical buildability.
-`;
-  }
-
-  /**
-   * Create prompt for design concepts
-   */
-  createConceptPrompt(requirements, preferences) {
-    return `
-You are an expert AI architect and interior designer. Based on these user requirements and preferences, generate innovative design concepts:
-
-User Requirements:
-${this.formatRequirements(requirements)}
-
-User Preferences:
-${this.formatPreferences(preferences)}
-
-Please provide 3-5 distinct design concepts that include:
-1. Architectural style and theme
-2. Spatial organization strategy
-3. Material and finish recommendations
-4. Color palette suggestions
-5. Lighting design approach
-6. Sustainability features
-7. Unique design elements
-
-Each concept should be practical, buildable, and tailored to the user's lifestyle and aesthetic preferences. Focus on creating cohesive, functional, and beautiful living spaces.
-`;
-  }
-
-  /**
-   * Parse AI-generated layouts from response
-   */
-  parseAIGeneratedLayouts(aiResponse, plot, requirements) {
-    // Extract layout information from AI response
-    const layouts = [];
-    
-    // Look for concept sections in the response
-    const conceptMatches = aiResponse.match(/Concept \d+[:\s]|Design \d+[:\s]|Layout \d+[:\s]/gi);
-    
-    if (conceptMatches) {
-      // Parse each concept
-      conceptMatches.forEach((match, index) => {
-        const layout = this.createLayoutFromConcept(match, aiResponse, plot, requirements);
-        if (layout) {
-          layouts.push(layout);
-        }
-      });
-    } else {
-      // Fallback: create a single layout from the response
-      const layout = this.createBasicLayoutFromResponse(aiResponse, plot, requirements);
-      if (layout) {
-        layouts.push(layout);
-      }
-    }
-
-    return layouts.length > 0 ? layouts : null;
-  }
-
-  /**
-   * Apply Gemini AI suggestions to existing layout
-   */
-  applyGeminiSuggestions(layout, suggestions) {
-    // Parse suggestions and apply them to the layout
-    const improvedLayout = { ...layout };
-    
-    // Look for specific improvement suggestions in the text
-    const improvementRegex = /(\w+)\s*:\s*(.+)/g;
-    let match;
-    
-    while ((match = improvementRegex.exec(suggestions)) !== null) {
-      const [_, category, suggestion] = match;
-      
-      switch (category.toLowerCase()) {
-        case 'room placement':
-          improvedLayout = this.adjustRoomPlacement(improvedLayout, suggestion);
-          break;
-        case 'dimensions':
-          improvedLayout = this.adjustDimensions(improvedLayout, suggestion);
-          break;
-        case 'flow':
-          improvedLayout = this.improveFlow(improvedLayout, suggestion);
-          break;
-      }
-    }
-
-    return {
-      ...improvedLayout,
-      metadata: {
-        ...improvedLayout.metadata,
-        geminiEnhanced: true,
-        geminiSuggestions: suggestions,
-        enhancementDate: new Date().toISOString()
-      }
-    };
-  }
-
-  /**
-   * Parse quality analysis from AI response
-   */
-  parseQualityAnalysis(analysis, layout) {
-    const scoreMatch = analysis.match(/Overall score[:\s]+(\d+)/i);
-    const overallScore = scoreMatch ? parseInt(scoreMatch[1]) : 75;
-
-    const strengthsMatch = analysis.match(/Strengths:[\s\S]*?Weaknesses:/i);
-    const strengths = strengthsMatch ? strengthsMatch[0].split('\n').slice(1).filter(line => line.trim()) : [];
-
-    const weaknessesMatch = analysis.match(/Weaknesses:[\s\S]*?Recommendations:/i);
-    const weaknesses = weaknessesMatch ? weaknessesMatch[0].split('\n').slice(1).filter(line => line.trim()) : [];
-
-    const recommendationsMatch = analysis.match(/Recommendations:[\s\S]*?$/i);
-    const recommendations = recommendationsMatch ? recommendationsMatch[0].split('\n').filter(line => line.trim()) : [];
-
-    return {
-      overallScore,
-      strengths: strengths.slice(0, 5), // Limit to top 5
-      weaknesses: weaknesses.slice(0, 5), // Limit to top 5
-      recommendations: recommendations.slice(0, 10), // Limit to top 10
-      detailedAnalysis: analysis
-    };
-  }
-
-  /**
-   * Parse design concepts from AI response
-   */
-  parseDesignConcepts(conceptsText) {
-    const designConcepts = [];
-    
-    // Look for concept sections
-    const conceptRegex = /(Concept \d+|Design \d+|Style \d+)[\s\S]*?(?=(Concept \d+|Design \d+|Style \d+|$))/gi;
-    const matches = conceptsText.match(conceptRegex);
-    
-    if (matches) {
-      matches.forEach((match, index) => {
-        const lines = match.split('\n').filter(line => line.trim());
-        designConcepts.push({
-          id: index + 1,
-          title: lines[0] || `Concept ${index + 1}`,
-          description: lines.slice(1).join(' '),
-          features: this.extractFeatures(lines),
-          style: this.extractStyle(lines)
-        });
-      });
-    }
-
-    return designConcepts.length > 0 ? designConcepts : this.getDefaultConcepts();
-  }
-
-  /**
-   * Helper methods for formatting and parsing
-   */
-  formatRequirements(requirements) {
-    return Object.entries(requirements)
-      .map(([key, value]) => `- ${key}: ${value}`)
-      .join('\n');
-  }
-
-  formatPreferences(preferences) {
-    if (!preferences) return 'No specific preferences';
-    
-    return Object.entries(preferences)
-      .map(([key, value]) => `- ${key}: ${value}`)
-      .join('\n');
-  }
-
-  extractFeatures(lines) {
-    return lines
-      .filter(line => line.includes('feature') || line.includes('element') || line.includes('aspect'))
-      .map(line => line.replace(/.*?:\s*/, ''))
-      .slice(0, 5);
-  }
-
-  extractStyle(lines) {
-    const styleLine = lines.find(line => line.toLowerCase().includes('style'));
-    return styleLine ? styleLine.replace(/.*?:\s*/, '') : 'Modern';
-  }
-
-  /**
-   * Fallback methods when Gemini is not configured
-   */
-  getDefaultConcepts() {
-    return [
-      {
-        id: 1,
-        title: 'Modern Minimalist',
-        description: 'Clean lines and open spaces with minimal decoration',
-        features: ['Open floor plan', 'Large windows', 'Neutral color palette'],
-        style: 'Modern'
-      },
-      {
-        id: 2,
-        title: 'Traditional Elegance',
-        description: 'Classic design elements with timeless appeal',
-        features: ['Defined room spaces', 'Warm materials', 'Classic details'],
-        style: 'Traditional'
-      }
+    const layoutDescriptions = [
+      'LINEAR: Horizontal bands stacked front-to-back. Balcony full-width at y=0. Living Room full-width next. Dining + Kitchen side-by-side in the middle. Bedrooms + Bathrooms side-by-side at the rear.',
+      'L-SHAPE: Full-width Balcony at front. Left 55% column: Living → Dining → Master Bed+Bath stacked. Right 45% column: Kitchen (tall) → Study → Bedroom+Bath stacked. Each column fills full remaining depth.',
+      'SPLIT-ZONE: Full-width Balcony at front. Left half: Living → Dining → Kitchen stacked full depth. Right half: Master Bed+Bath → Bedroom+Bath stacked full depth. Public and private completely separated.',
+      'COMPACT: Full-width Balcony at front. Central 3.5ft corridor runs full depth. Left of corridor: Living → Study → Master Bed+Bath stacked. Right of corridor: Dining → Kitchen → Bedroom+Bath stacked.',
+      'OPEN-PLAN: Full-width Balcony at front. Below it, Living+Dining+Kitchen merged in one open row side-by-side (same y, same height). All Bedrooms+Bathrooms in one row at the rear.',
     ];
+
+    const prompt = `You are a senior Indian residential architect. Generate ${count} COMPLETELY DIFFERENT floor plan layouts for the plot below. Each must be a genuine architectural variant — not just resized copies.
+
+═══ COORDINATE SYSTEM ═══
+• Buildable area: ${bW}ft wide × ${bL}ft deep
+• x goes LEFT→RIGHT:  0 = left/west wall, ${bW} = right/east wall
+• y goes FRONT→BACK:  0 = FRONT (road/${facing} side), ${bL} = BACK (garden)
+• All coordinates are RELATIVE to the buildable area origin (0, 0)
+
+═══ SITE ═══
+Plot: ${plot.width}ft × ${plot.length}ft, ${facing.toUpperCase()}-facing
+Buildable zone: ${bW}ft wide × ${bL}ft deep
+
+═══ REQUIRED ROOMS ═══
+${roomList}
+
+═══ LAYOUT TYPES — use exactly one per variation ═══
+${layoutDescriptions.slice(0, count).map((d, i) => `Variation ${i + 1}: ${d}`).join('\n')}
+
+═══ HARD RULES — every room in every variation must obey ═══
+1. BOUNDS: 0 ≤ x, (x + width) ≤ ${bW}, 0 ≤ y, (y + height) ≤ ${bL}
+2. NO OVERLAP: rooms must not intersect (touching edges at the same x or y is fine)
+3. FILL: rooms should cover the buildable area with no large gaps
+4. BALCONY: always at y=0, width ≥ ${Math.round(bW * 0.6)}ft, height = 5 or 6ft
+5. ADJACENCY: kitchen x-adjacent or y-adjacent to dining (they must share a wall)
+6. BATHROOMS: each bathroom must share a wall with a bedroom (same x-range or same y-range, touching)
+7. BEDROOMS: cluster at the rear (large y values)
+8. BATHROOM SIZE: width ≥ 6ft, height ≥ 8ft — never smaller
+${prefs.vastu ? '9. VASTU: Master bedroom at south-west (large x, large y); kitchen at south-east; prayer room at north-east (small x, small y)' : ''}
+
+═══ OUTPUT FORMAT ═══
+Return ONLY a raw JSON array — no markdown, no explanation:
+[
+  {
+    "layoutStyle": "linear",
+    "designTheme": "Modern Minimalist",
+    "description": "Three-band north-facing plan with open social core",
+    "rooms": [
+      { "type": "balcony",       "x": 0,  "y": 0,  "width": ${bW}, "height": 5  },
+      { "type": "living_room",   "x": 0,  "y": 5,  "width": ${bW}, "height": 14 },
+      { "type": "dining",        "x": 0,  "y": 19, "width": ${Math.round(bW*0.5)}, "height": 11 },
+      { "type": "kitchen",       "x": ${Math.round(bW*0.5)}, "y": 19, "width": ${bW - Math.round(bW*0.5)}, "height": 11 },
+      { "type": "master_bedroom","x": 0,  "y": 30, "width": ${Math.round(bW*0.55)}, "height": ${bL - 30} },
+      { "type": "bathroom",      "x": ${Math.round(bW*0.55)}, "y": 30, "width": ${Math.round(bW*0.25)}, "height": ${bL - 30} },
+      { "type": "bedroom",       "x": ${Math.round(bW*0.8)}, "y": 30, "width": ${bW - Math.round(bW*0.8)}, "height": ${bL - 30} }
+    ]
+  }
+]
+
+VALID room type names: balcony, living_room, dining, kitchen, master_bedroom, bedroom, bathroom, study, prayer_room, guest_room, utility_room, terrace
+
+Generate exactly ${count} variation objects now, each with a genuinely different spatial arrangement:`;
+
+    try {
+      const result = await this.model.generateContent(prompt);
+      const text   = result.response.text();
+      const parsed = this.extractJSON(text);
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        console.warn('Gemini room placements: no usable output');
+        return null;
+      }
+
+      return parsed.slice(0, count).map((v, i) => this._sanitiseVariation(v, i, bW, bL));
+    } catch (err) {
+      console.error('Gemini generateRoomPlacements failed:', err.message);
+      return null;
+    }
+  }
+
+  // ─── SECONDARY: design parameters (used as fallback by rule-based engine) ──
+
+  async generateDesignParameters(plot, requirements, preferences, count) {
+    if (!this.isConfigured()) return null;
+
+    const bW = Math.round(plot.width  - (plot.setback?.left || 4) - (plot.setback?.right || 4));
+    const bL = Math.round(plot.length - (plot.setback?.front || 6) - (plot.setback?.back  || 4));
+    const facing = (plot.facing || 'north').toLowerCase();
+
+    const prompt = `You are a senior Indian residential architect. Generate ${count} distinct design-parameter sets for floor plan variations.
+
+Site: ${plot.width}×${plot.length}ft, ${facing}-facing. Buildable: ${bW}×${bL}ft.
+Rooms: ${JSON.stringify(requirements)}. Preferences: ${JSON.stringify(preferences || {})}.
+
+Return ONLY a raw JSON array:
+[{
+  "layoutStyle": "linear",
+  "designTheme": "Modern Minimalist",
+  "description": "...",
+  "roomSizes": {
+    "living_room": {"width": 16, "height": 14},
+    "dining":      {"width": 13, "height": 11},
+    "kitchen":     {"width": 12, "height": 10},
+    "master_bedroom": {"width": 14, "height": 13},
+    "bedroom":     {"width": 12, "height": 11},
+    "bathroom":    {"width":  7, "height":  9},
+    "study":       {"width": 11, "height": 10},
+    "balcony":     {"width": 14, "height":  5}
+  }
+}]
+
+Styles: linear, l-shape, split-zone, compact, open-plan (use each once).
+Bathroom min: width≥6, height≥8. No aspect ratio > 1.7.
+Generate ${count} objects:`;
+
+    try {
+      const result = await this.model.generateContent(prompt);
+      const text   = result.response.text();
+      const params = this.extractJSON(text);
+      if (!Array.isArray(params) || params.length === 0) return null;
+      return params.slice(0, count).map((p, i) => this._sanitiseParams(p, i, bW, bL));
+    } catch (err) {
+      console.error('Gemini generateDesignParameters failed:', err.message);
+      return null;
+    }
+  }
+
+  // ─── Other methods ────────────────────────────────────────────────────────
+
+  async refineLayoutWithGemini(layout, requirements) {
+    if (!this.isConfigured()) return layout;
+    const prompt = `You are an expert architect. Suggest improvements to this floor plan.
+Plot: ${layout.plot.width}ft x ${layout.plot.length}ft facing ${layout.plot.facing}
+Rooms: ${layout.rooms.map(r => `${r.type} ${r.width}x${r.height}`).join(', ')}
+Space utilisation: ${planUtils.calculateUtilization(layout).toFixed(1)}%
+Requirements: ${JSON.stringify(requirements)}
+List up to 5 specific, actionable improvements.`;
+    try {
+      const result = await this.model.generateContent(prompt);
+      return { ...layout, metadata: { ...layout.metadata, geminiEnhanced: true, geminiSuggestions: result.response.text() } };
+    } catch (err) {
+      return layout;
+    }
+  }
+
+  async analyzeLayoutQuality(layout) {
+    if (!this.isConfigured()) return this.getBasicAnalysis(layout);
+    const prompt = `Analyse this residential floor plan and score it:
+Plot: ${layout.plot.width}x${layout.plot.length}ft, facing ${layout.plot.facing}
+Rooms: ${layout.rooms.map(r => `${r.type} ${r.width}x${r.height} at (${r.x},${r.y})`).join('\n')}
+Respond:
+Overall score: [1-100]
+Strengths: [bullets]
+Weaknesses: [bullets]
+Recommendations: [bullets]`;
+    try {
+      const result = await this.model.generateContent(prompt);
+      return this._parseQualityAnalysis(result.response.text(), layout);
+    } catch (err) {
+      return this.getBasicAnalysis(layout);
+    }
+  }
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+
+  _buildRoomList(req, bW, bL) {
+    const lines = [];
+    if (req.balcony !== false)
+      lines.push(`• balcony: 1 room, width=${bW}ft, height=5-6ft (full-width front strip)`);
+    if (req.living_room > 0 || req.living_room !== false)
+      lines.push(`• living_room: 1 room, width=14-${bW}ft, height=12-16ft`);
+    if (req.dining > 0 || req.dining !== false)
+      lines.push(`• dining: 1 room, width=11-15ft, height=10-13ft`);
+    if (req.kitchen > 0 || req.kitchen !== false)
+      lines.push(`• kitchen: 1 room, width=10-14ft, height=10-12ft`);
+    const beds = parseInt(req.bedrooms || 2);
+    if (beds > 0 && req.master_bedroom !== false)
+      lines.push(`• master_bedroom: 1 room, width=13-16ft, height=12-15ft`);
+    if (beds > 1)
+      lines.push(`• bedroom: ${beds - 1} room(s), width=11-14ft, height=10-13ft each`);
+    const baths = parseInt(req.bathrooms || 2);
+    if (baths > 0)
+      lines.push(`• bathroom: ${baths} room(s), width≥6ft, height≥8ft each (HARD MINIMUM)`);
+    if (parseInt(req.study || 0) > 0)
+      lines.push(`• study: 1 room, width=10-13ft, height=10-12ft`);
+    if (req.prayer_room)
+      lines.push(`• prayer_room: 1 room, width=8-12ft, height=8-10ft`);
+    if (parseInt(req.guest_room || 0) > 0)
+      lines.push(`• guest_room: 1 room, width=11-14ft, height=10-12ft`);
+    if (parseInt(req.utility_room || 0) > 0)
+      lines.push(`• utility_room: 1 room, width=6-10ft, height=8-10ft`);
+    return lines.join('\n');
+  }
+
+  _sanitiseVariation(v, index, bW, bL) {
+    const styles = ['linear', 'l-shape', 'split-zone', 'compact', 'open-plan'];
+    const themes = ['Modern Minimalist', 'Contemporary', 'Traditional Elegance', 'Vastu Compliant', 'Scandinavian'];
+
+    const rooms = Array.isArray(v.rooms) ? v.rooms.map(r => ({
+      type:   String(r.type || 'bedroom'),
+      x:      Math.max(0, parseFloat(r.x) || 0),
+      y:      Math.max(0, parseFloat(r.y) || 0),
+      width:  Math.max(1, parseFloat(r.width)  || 6),
+      height: Math.max(1, parseFloat(r.height) || 8),
+    })).map(r => ({
+      ...r,
+      // Clip to buildable bounds
+      width:  Math.min(r.width,  bW - r.x),
+      height: Math.min(r.height, bL - r.y),
+    })) : [];
+
+    return {
+      layoutStyle: styles.includes(v.layoutStyle) ? v.layoutStyle : styles[index % styles.length],
+      designTheme: v.designTheme || themes[index % themes.length],
+      description: v.description || `AI Layout Variation ${index + 1}`,
+      rooms,
+    };
+  }
+
+  _sanitiseParams(p, index, maxW, maxL) {
+    const styles = ['linear', 'l-shape', 'split-zone', 'compact', 'open-plan'];
+    const themes = ['Modern Minimalist', 'Contemporary', 'Traditional Elegance', 'Vastu Compliant', 'Scandinavian'];
+    const clamp  = (v, lo, hi) => Math.max(lo, Math.min(hi, v || 0));
+    const rs = p.roomSizes || {};
+    const make = (rawW, rawH, minW, minH) => {
+      const w = clamp(rawW, minW, maxW * 0.55);
+      const h = clamp(rawH, minH, maxL * 0.55);
+      return { width: w, height: h };
+    };
+    return {
+      layoutStyle:  styles.includes(p.layoutStyle) ? p.layoutStyle : styles[index % styles.length],
+      designTheme:  p.designTheme  || themes[index % themes.length],
+      description:  p.description  || `Design variation ${index + 1}`,
+      roomSizes: {
+        living_room:    make(rs.living_room?.width,    rs.living_room?.height,    13, 12),
+        dining:         make(rs.dining?.width,          rs.dining?.height,         11, 10),
+        kitchen:        make(rs.kitchen?.width,         rs.kitchen?.height,        10, 10),
+        master_bedroom: make(rs.master_bedroom?.width,  rs.master_bedroom?.height, 13, 12),
+        bedroom:        make(rs.bedroom?.width,         rs.bedroom?.height,        11, 10),
+        bathroom:       make(rs.bathroom?.width,        rs.bathroom?.height,         6,  8),
+        study:          make(rs.study?.width,           rs.study?.height,          10, 10),
+        balcony:        make(rs.balcony?.width,         rs.balcony?.height,         8,  5),
+        guest_room:     make(rs.guest_room?.width,      rs.guest_room?.height,     11, 10),
+        utility_room:   make(rs.utility_room?.width,    rs.utility_room?.height,    6,  8),
+        prayer_room:    make(rs.prayer_room?.width,     rs.prayer_room?.height,     8,  8),
+      },
+      features: p.features || { masterEnSuite: true, balconyPosition: 'front', staircasePosition: 'corner' },
+    };
+  }
+
+  _parseQualityAnalysis(analysis, layout) {
+    const scoreMatch  = analysis.match(/Overall score[:\s]+(\d+)/i);
+    const parseList   = (m) => m ? m[1].split('\n').map(l => l.replace(/^[-*•]\s*/, '').trim()).filter(Boolean).slice(0, 5) : [];
+    return {
+      overallScore:    scoreMatch ? parseInt(scoreMatch[1]) : 75,
+      strengths:       parseList(analysis.match(/Strengths:([\s\S]*?)(?:Weaknesses:|$)/i)),
+      weaknesses:      parseList(analysis.match(/Weaknesses:([\s\S]*?)(?:Recommendations:|$)/i)),
+      recommendations: parseList(analysis.match(/Recommendations:([\s\S]*?)$/i)),
+      detailedAnalysis: analysis,
+    };
   }
 
   getBasicAnalysis(layout) {
     const utilization = planUtils.calculateUtilization(layout);
     return {
-      overallScore: utilization > 70 ? 85 : 65,
+      overallScore: utilization > 70 ? 82 : 62,
       strengths: ['Functional layout', 'Good room proportions'],
-      weaknesses: ['Could optimize space utilization', 'Limited natural light optimization'],
-      recommendations: ['Consider open plan layout', 'Optimize room positioning'],
-      detailedAnalysis: 'Basic analysis performed without AI enhancement'
+      weaknesses: ['Space utilisation could improve'],
+      recommendations: ['Consider open-plan living area', 'Optimise room positioning'],
+      detailedAnalysis: 'Basic analysis (Gemini not configured)',
     };
   }
 
-  // Placeholder methods for layout modifications
-  createLayoutFromConcept(concept, response, plot, requirements) {
-    // This would parse specific concept details and create a layout
+  extractJSON(text) {
+    const stripped = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    const s = stripped.indexOf('['), e = stripped.lastIndexOf(']');
+    if (s !== -1 && e !== -1) {
+      try { return JSON.parse(stripped.slice(s, e + 1)); } catch { /* ignore */ }
+    }
+    const s2 = text.indexOf('['), e2 = text.lastIndexOf(']');
+    if (s2 !== -1 && e2 !== -1) {
+      try { return JSON.parse(text.slice(s2, e2 + 1)); } catch { /* ignore */ }
+    }
     return null;
-  }
-
-  createBasicLayoutFromResponse(response, plot, requirements) {
-    // This would create a basic layout from the AI response
-    return null;
-  }
-
-  adjustRoomPlacement(layout, suggestion) {
-    // This would implement room placement adjustments
-    return layout;
-  }
-
-  adjustDimensions(layout, suggestion) {
-    // This would implement dimension adjustments
-    return layout;
-  }
-
-  improveFlow(layout, suggestion) {
-    // This would implement flow improvements
-    return layout;
   }
 }
 

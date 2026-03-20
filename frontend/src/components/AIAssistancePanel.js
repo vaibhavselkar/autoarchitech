@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
+import api from '../services/api';
 
 /**
  * AI Assistance Panel Component
@@ -22,20 +23,10 @@ const AIAssistancePanel = ({
 
     try {
       setIsAnalyzing(true);
-      const response = await fetch('/api/plans/generate-suggestions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          layout: plan.layoutJson,
-          requirements: plan.requirements || {}
-        })
+      const { data } = await api.post('/plans/generate-suggestions', {
+        layout: plan.layoutJson,
+        requirements: plan.requirements || {}
       });
-
-      const data = await response.json();
-      
       if (data.success) {
         setSuggestions(data.data.concepts || []);
         toast.success('AI design suggestions generated!');
@@ -56,25 +47,13 @@ const AIAssistancePanel = ({
 
     try {
       setIsAnalyzing(true);
-      const response = await fetch('/api/plans/analyze-quality', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          layout: plan.layoutJson
-        })
+      const { data } = await api.post('/plans/analyze-quality', {
+        layout: plan.layoutJson
       });
-
-      const data = await response.json();
-      
       if (data.success) {
         setAnalysis(data.data);
         toast.success('Quality analysis complete!');
-        if (onQualityAnalysis) {
-          onQualityAnalysis(data.data);
-        }
+        if (onQualityAnalysis) onQualityAnalysis(data.data);
       } else {
         toast.error('Failed to analyze quality');
       }
@@ -91,25 +70,13 @@ const AIAssistancePanel = ({
     if (!plan) return;
 
     try {
-      const response = await fetch('/api/plans/apply-suggestion', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          planId: plan._id,
-          suggestion: suggestion
-        })
+      const { data } = await api.post('/plans/apply-suggestion', {
+        planId: plan._id,
+        suggestion
       });
-
-      const data = await response.json();
-      
       if (data.success) {
         toast.success('Suggestion applied successfully!');
-        if (onSuggestionApplied) {
-          onSuggestionApplied(data.data.plan);
-        }
+        if (onSuggestionApplied) onSuggestionApplied(data.data.plan);
       } else {
         toast.error('Failed to apply suggestion');
       }

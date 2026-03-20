@@ -15,17 +15,25 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+const allowedOrigins = process.env.FRONTEND_URL
+  ? [process.env.FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3004']
+  : true;
+
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Database connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/autoarchitect', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => console.log('MongoDB connected'))
-.catch(err => console.error('MongoDB connection error:', err));
+// Database connection — cached for serverless environments
+let cachedConn = null;
+async function connectDB() {
+  if (cachedConn && mongoose.connection.readyState === 1) return cachedConn;
+  cachedConn = await mongoose.connect(
+    process.env.MONGODB_URI || 'mongodb://localhost:27017/autoarchitect'
+  );
+  console.log('MongoDB connected');
+  return cachedConn;
+}
+connectDB().catch(err => console.error('MongoDB connection error:', err));
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -50,9 +58,11 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Start server only outside Vercel (local dev)
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
 
 module.exports = app;
