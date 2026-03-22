@@ -222,6 +222,227 @@ const ROOM_LABELS = {
   prayer_room: 'Prayer Room', guest_room: 'Guest Room', utility_room: 'Utility',
 };
 
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+const r2 = v => Math.round(v * 100) / 100;
+
+function parsePlot(plot) {
+  const width  = parseFloat(plot.width  || plot.plotWidth  || 30);
+  const length = parseFloat(plot.length || plot.plotLength || 40);
+  const facing = (plot.facing || 'north').toLowerCase();
+  const setback = {
+    front: parseFloat(plot.setback?.front ?? plot.frontSetback ?? 6),
+    back:  parseFloat(plot.setback?.back  ?? plot.backSetback  ?? 4),
+    left:  parseFloat(plot.setback?.left  ?? plot.leftSetback  ?? 4),
+    right: parseFloat(plot.setback?.right ?? plot.rightSetback ?? 4),
+  };
+  return { width, length, facing, setback };
+}
+
+function parseRequirements(req) {
+  return {
+    bedrooms:     parseInt(req.bedrooms     ?? req.numBedrooms  ?? 2),
+    bathrooms:    parseInt(req.bathrooms    ?? req.numBathrooms ?? 2),
+    living_room:  req.living_room  !== false ? 1 : 0,
+    dining:       req.dining       !== false ? 1 : 0,
+    kitchen:      req.kitchen      !== false ? 1 : 0,
+    balcony:      req.balcony      !== false ? 1 : 0,
+    study:        parseInt(req.study        ?? 0),
+    prayer_room:  req.prayer_room  ? 1 : 0,
+    guest_room:   parseInt(req.guest_room   ?? 0),
+    utility_room: parseInt(req.utility_room ?? 0),
+  };
+}
+
+function parsePreferences(prefs = {}) {
+  return {
+    vastu:   prefs.vastu   || false,
+    parking: prefs.parking || { cars: 1, gate_direction: 'left' },
+    style:   prefs.style   || 'modern',
+  };
+}
+
+function getBuildable(plotData) {
+  const sb = plotData.setback;
+  return {
+    x:      sb.left,
+    y:      sb.back,
+    width:  r2(plotData.width  - sb.left - sb.right),
+    length: r2(plotData.length - sb.back - sb.front),
+  };
+}
+
+// ─── Door generation ──────────────────────────────────────────────────────────
+
+function generateDoors(rooms, plotData, buildable, prefs) {
+  const doors = [];
+  const byType = {};
+  rooms.forEach(r => { (byType[r.type] = byType[r.type] || []).push(r); });
+
+  // shared-wall helpers
+  const sharedH = (r1, r2) => {
+    const sy = Math.abs((r1.y + r1.height) - r2.y) < 1 ? r1.y + r1.height : null;
+    if (!sy) return null;
+    const l = Math.max(r1.x, r2.x), ri = Math.min(r1.x + r1.width, r2.x + r2.width);
+    if (ri - l < DOOR_W + 0.5) return null;
+    return { x: l + (ri - l) / 2 - DOOR_W / 2, y: sy };
+  };
+  const sharedV = (r1, r2) => {
+    const sx = Math.abs((r1.x + r1.width) - r2.x) < 1 ? r1.x + r1.width : null;
+    if (!sx) return null;
+    const t = Math.max(r1.y, r2.y), b = Math.min(r1.y + r1.height, r2.y + r2.height);
+    if (b - t < DOOR_W + 0.5) return null;
+    return { x: sx, y: t + (b - t) / 2 - DOOR_W / 2 };
+  };
+  const findShared = (a, b) => sharedH(a,b)||sharedH(b,a)||sharedV(a,b)||sharedV(b,a);
+
+  // 1. Main entry door on front wall
+  const parkSide = prefs.parking?.gate_direction || 'left';
+  const mainDoorX = parkSide === 'right'   ? buildable.x + buildable.width * 0.25
+                  : parkSide === 'center'  ? buildable.x + buildable.width * 0.5 - 2
+                  :                          buildable.x + buildable.width * 0.65;
+  doors.push({ x: mainDoorX, y: buildable.y, width: 4, height: 7, orientation: 'horizontal', type: 'main', label: 'ENTRY' });
+
+  // 2. Balcony ↔ Living sliding door
+  (byType['balcony']||[]).forEach(bal => (byType['living_room']||[]).forEach(liv => {
+    const pt = sharedH(bal, liv);
+    if (pt) doors.push({ x: pt.x, y: pt.y, width: DOOR_W, height: 7, orientation: 'horizontal', type: 'sliding' });
+  }));
+
+  // 3. Living ↔ Dining
+  (byType['living_room']||[]).forEach(liv => (byType['dining']||[]).forEach(din => {
+    const pt = findShared(liv, din);
+    if (pt) {
+      const isV = !!(sharedV(liv,din)||sharedV(din,liv));
+      doors.push({ x: pt.x, y: pt.y, width: DOOR_W, height: 7, orientation: isV?'vertical':'horizontal', type: 'room' });
+    }
+  }));
+
+  // 4. Dining ↔ Kitchen
+  (byType['dining']||[]).forEach(din => (byType['kitchen']||[]).forEach(kit => {
+    const pt = findShared(din, kit);
+    if (pt) {
+      const isV = !!(sharedV(din,kit)||sharedV(kit,din));
+      doors.push({ x: pt.x, y: pt.y, width: DOOR_W, height: 7, orientation: isV?'vertical':'horizontal', type: 'room' });
+    }
+  }));
+
+  // 5. Bedroom ↔ Bathroom (en-suite)
+  ['master_bedroom','bedroom','guest_room'].forEach(bt =>
+    (byType['bathroom']||[]).forEach(bath => (byType[bt]||[]).forEach(bed => {
+      const pt = findShared(bed, bath);
+      if (pt) {
+        const isV = !!(sharedV(bed,bath)||sharedV(bath,bed));
+        doors.push({ x: pt.x, y: pt.y, width: 2.5, height: 7, orientation: isV?'vertical':'horizontal', type: 'bathroom' });
+      }
+    }))
+  );
+
+  // 6. Passage door on every private room
+  ['master_bedroom','bedroom','study','guest_room','prayer_room','utility_room'].forEach(bt =>
+    (byType[bt]||[]).forEach(r =>
+      doors.push({ x: r.x + r.width * 0.3, y: r.y, width: DOOR_W, height: 7, orientation: 'horizontal', type: 'room' })
+    )
+  );
+
+  // 7. Guarantee every room has at least one door
+  rooms.forEach(r => {
+    const TOL = 1.5;
+    const hasDoor = doors.some(d => {
+      const onFront = Math.abs(d.y - r.y) < TOL              && d.x >= r.x - TOL && d.x < r.x + r.width;
+      const onBack  = Math.abs(d.y - (r.y + r.height)) < TOL && d.x >= r.x - TOL && d.x < r.x + r.width;
+      const onLeft  = Math.abs(d.x - r.x) < TOL              && d.y >= r.y - TOL && d.y < r.y + r.height;
+      const onRight = Math.abs(d.x - (r.x + r.width)) < TOL  && d.y >= r.y - TOL && d.y < r.y + r.height;
+      return onFront || onBack || onLeft || onRight;
+    });
+    if (!hasDoor) {
+      doors.push({ x: r.x + r.width * 0.3, y: r.y, width: r.type === 'bathroom' ? 2.5 : DOOR_W, height: 7, orientation: 'horizontal', type: 'room' });
+    }
+  });
+
+  return doors;
+}
+
+// ─── Window generation ────────────────────────────────────────────────────────
+
+function generateWindows(rooms, buildable) {
+  const windows = [];
+  rooms.forEach(r => {
+    const onFront = Math.abs(r.y - buildable.y) < 1;
+    const onBack  = Math.abs(r.y + r.height - (buildable.y + buildable.length)) < 1;
+    const onLeft  = Math.abs(r.x - buildable.x) < 1;
+    const onRight = Math.abs(r.x + r.width - (buildable.x + buildable.width)) < 1;
+    if (onFront && r.type !== 'bathroom')
+      windows.push({ x: r.x + r.width * 0.3, y: r.y, width: 3, height: 4, orientation: 'horizontal', wall: 'front' });
+    if (onBack && !['bathroom','utility_room'].includes(r.type))
+      windows.push({ x: r.x + r.width * 0.5, y: r.y + r.height, width: 3, height: 4, orientation: 'horizontal', wall: 'back' });
+    if (onLeft)
+      windows.push({ x: r.x, y: r.y + r.height * 0.4, width: 2.5, height: 4, orientation: 'vertical', wall: 'left' });
+    if (onRight)
+      windows.push({ x: r.x + r.width, y: r.y + r.height * 0.4, width: 2.5, height: 4, orientation: 'vertical', wall: 'right' });
+  });
+  return windows;
+}
+
+// ─── Wall generation ──────────────────────────────────────────────────────────
+
+function generateWalls(rooms, plotData) {
+  const sb = plotData.setback;
+  const walls = [
+    { x1: sb.left, y1: sb.back, x2: plotData.width - sb.right, y2: sb.back, type: 'exterior' },
+    { x1: plotData.width - sb.right, y1: sb.back, x2: plotData.width - sb.right, y2: plotData.length - sb.front, type: 'exterior' },
+    { x1: sb.left, y1: plotData.length - sb.front, x2: plotData.width - sb.right, y2: plotData.length - sb.front, type: 'exterior' },
+    { x1: sb.left, y1: sb.back, x2: sb.left, y2: plotData.length - sb.front, type: 'exterior' },
+  ];
+  for (let i = 0; i < rooms.length; i++) {
+    for (let j = i + 1; j < rooms.length; j++) {
+      const a = rooms[i], b = rooms[j];
+      if (Math.abs((a.y + a.height) - b.y) < 0.5) {
+        const x1 = Math.max(a.x, b.x), x2 = Math.min(a.x + a.width, b.x + b.width);
+        if (x2 > x1 + 0.5) walls.push({ x1, y1: b.y, x2, y2: b.y, type: 'interior' });
+      }
+      if (Math.abs((a.x + a.width) - b.x) < 0.5) {
+        const y1 = Math.max(a.y, b.y), y2 = Math.min(a.y + a.height, b.y + b.height);
+        if (y2 > y1 + 0.5) walls.push({ x1: b.x, y1, x2: b.x, y2, type: 'interior' });
+      }
+    }
+  }
+  return walls;
+}
+
+// ─── Staircase, Parking, Setback zones, Dimensions ───────────────────────────
+
+function placeStaircase(buildable) {
+  return { x: buildable.x + buildable.width - 8, y: buildable.y + buildable.length - 10, width: 8, height: 10, type: 'staircase' };
+}
+
+function placeParking(plotData, buildable, parkPrefs = {}) {
+  const cars = parseInt(parkPrefs.cars || 1);
+  const dir  = parkPrefs.gate_direction || 'left';
+  const w    = r2(PARK_W * cars);
+  const x    = dir === 'right' ? plotData.width - w - plotData.setback.right : plotData.setback.left;
+  return { x: r2(x), y: 0, width: w, height: PARK_L, cars, gate_direction: dir };
+}
+
+function buildSetbackZones(plotData) {
+  const sb = plotData.setback;
+  return [
+    { x: 0, y: 0, width: plotData.width, height: sb.back, label: 'Front Setback', zone: 'front' },
+    { x: 0, y: plotData.length - sb.front, width: plotData.width, height: sb.front, label: 'Rear Setback', zone: 'rear' },
+    { x: 0, y: sb.back, width: sb.left, height: plotData.length - sb.back - sb.front, label: 'Left Setback', zone: 'left' },
+    { x: plotData.width - sb.right, y: sb.back, width: sb.right, height: plotData.length - sb.back - sb.front, label: 'Right Setback', zone: 'right' },
+  ];
+}
+
+function buildDimensions(plotData) {
+  const sb = plotData.setback;
+  return {
+    overall:   { width: plotData.width, length: plotData.length },
+    buildable: { width: r2(plotData.width - sb.left - sb.right), length: r2(plotData.length - sb.back - sb.front) },
+    setbacks:  sb,
+  };
+}
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
