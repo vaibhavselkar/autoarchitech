@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Stage, Layer, Rect, Text, Group, Line, Arc } from 'react-konva';
+import { Stage, Layer, Rect, Text, Group, Line, Arc, Circle } from 'react-konva';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import ThreeDViewer from '../components/ThreeDViewer';
@@ -315,58 +315,94 @@ function FloorPlanCanvas({ layout, width, height }) {
           const dimTxt = `${Math.round(room.width)}' × ${Math.round(room.height)}'`;
 
           // ── Furniture symbols ─────────────────────────────────────────
-          const furniture = [];
-          const fw = rw, fh = rh; // alias for readability
-          const P = 4; // padding from wall
+          const furniture = []; // { key, type:'rect'|'circle'|'line', ... }
+          const fw = rw, fh = rh;
+          const P = 4;
 
           if (!tiny && room.type === 'kitchen' && fw > 30 && fh > 30) {
-            // Counter L-shape along back + right wall
-            furniture.push({ key:'kc1', x: rx+P, y: ry+fh-P-8, w: fw-P*2, h: 8, fill:'#A7F3D0', stroke:'#059669' });
-            furniture.push({ key:'kc2', x: rx+fw-P-8, y: ry+P, w: 8, h: fh-P*2-8, fill:'#A7F3D0', stroke:'#059669' });
-            // Sink circle on counter
-            furniture.push({ key:'ks', x: rx+P+8, y: ry+fh-P-8+1, w: 10, h: 6, fill:'#6EE7B7', stroke:'#059669', round:2 });
+            // L-counter: back wall
+            furniture.push({ key:'kc1', x: rx+P, y: ry+fh-P-9, w: fw-P*2, h: 9, fill:'#BBFDE8', stroke:'#059669', round:1 });
+            // L-counter: right wall
+            furniture.push({ key:'kc2', x: rx+fw-P-9, y: ry+P, w: 9, h: fh-P*2-9, fill:'#BBFDE8', stroke:'#059669', round:1 });
+            // Double sink on back counter
+            furniture.push({ key:'ks1', x: rx+P+3,  y: ry+fh-P-7.5, w: 7, h: 5.5, fill:'#6EE7B7', stroke:'#059669', round:1.5 });
+            furniture.push({ key:'ks2', x: rx+P+12, y: ry+fh-P-7.5, w: 7, h: 5.5, fill:'#6EE7B7', stroke:'#059669', round:1.5 });
+            // Sink drain dots
+            furniture.push({ type:'circle', key:'kd1', cx: rx+P+6.5,  cy: ry+fh-P-4.5, r:1.2, fill:'#34D399', stroke:'#059669' });
+            furniture.push({ type:'circle', key:'kd2', cx: rx+P+15.5, cy: ry+fh-P-4.5, r:1.2, fill:'#34D399', stroke:'#059669' });
+            // Hob (4 burners) on right counter
+            if (fh > 45) {
+              const hx = rx+fw-P-7, hy = ry+P+10;
+              [[0,0],[5,0],[0,6],[5,6]].forEach(([bx,by],bi) => {
+                furniture.push({ type:'circle', key:`hb${bi}`, cx: hx+bx, cy: hy+by, r:2, fill:'#64748B', stroke:'#334155' });
+              });
+            }
           }
 
-          if (!tiny && (room.type === 'living_room') && fw > 40 && fh > 35) {
-            // Sofa against back wall
-            furniture.push({ key:'ls', x: rx+P, y: ry+fh*0.55, w: fw*0.55, h: fh*0.22, fill:'#BFDBFE', stroke:'#2563EB', round:3 });
-            // TV on front wall (thin rect)
-            furniture.push({ key:'ltv', x: rx+fw*0.2, y: ry+P+1, w: fw*0.45, h: 5, fill:'#1E293B', stroke:'#334155', round:1 });
+          if (!tiny && room.type === 'living_room' && fw > 40 && fh > 35) {
+            // TV unit on front wall
+            furniture.push({ key:'ltv', x: rx+fw*0.15, y: ry+P,   w: fw*0.5,  h: 4,       fill:'#0F172A', stroke:'#1E293B', round:1 });
+            // TV stand
+            furniture.push({ key:'lts', x: rx+fw*0.2,  y: ry+P+4, w: fw*0.4,  h: 3,       fill:'#334155', stroke:'#1E293B', round:0 });
+            // Sofa (3-seater)
+            furniture.push({ key:'ls',  x: rx+P,        y: ry+fh*0.52, w: fw*0.62, h: fh*0.22, fill:'#BFDBFE', stroke:'#2563EB', round:4 });
+            // Sofa back cushion dividers
+            furniture.push({ key:'ls1', x: rx+P+fw*0.2,  y: ry+fh*0.52+2, w:1.5, h: fh*0.19, fill:'#93C5FD', stroke:'#2563EB', round:0 });
+            furniture.push({ key:'ls2', x: rx+P+fw*0.41, y: ry+fh*0.52+2, w:1.5, h: fh*0.19, fill:'#93C5FD', stroke:'#2563EB', round:0 });
             // Coffee table
-            furniture.push({ key:'lct', x: rx+P+6, y: ry+fh*0.42, w: fw*0.3, h: fh*0.11, fill:'#FEF3C7', stroke:'#D97706', round:2 });
+            furniture.push({ key:'lct', x: rx+P+6, y: ry+fh*0.4, w: fw*0.32, h: fh*0.1, fill:'#FEF3C7', stroke:'#D97706', round:2 });
           }
 
-          if (!tiny && (room.type === 'dining') && fw > 32 && fh > 28) {
-            // Dining table (centre)
-            furniture.push({ key:'dt', x: rx+fw*0.2, y: ry+fh*0.25, w: fw*0.6, h: fh*0.5, fill:'#FDE68A', stroke:'#D97706', round:3 });
+          if (!tiny && room.type === 'dining' && fw > 32 && fh > 28) {
+            // Table
+            furniture.push({ key:'dt', x: rx+fw*0.18, y: ry+fh*0.2, w: fw*0.64, h: fh*0.55, fill:'#FDE68A', stroke:'#D97706', round:3 });
+            // Chairs (small rects) around table
+            furniture.push({ key:'dc1', x: rx+fw*0.27, y: ry+fh*0.12, w: fw*0.16, h: fh*0.08, fill:'#FEF3C7', stroke:'#D97706', round:2 });
+            furniture.push({ key:'dc2', x: rx+fw*0.55, y: ry+fh*0.12, w: fw*0.16, h: fh*0.08, fill:'#FEF3C7', stroke:'#D97706', round:2 });
+            furniture.push({ key:'dc3', x: rx+fw*0.27, y: ry+fh*0.78, w: fw*0.16, h: fh*0.08, fill:'#FEF3C7', stroke:'#D97706', round:2 });
+            furniture.push({ key:'dc4', x: rx+fw*0.55, y: ry+fh*0.78, w: fw*0.16, h: fh*0.08, fill:'#FEF3C7', stroke:'#D97706', round:2 });
           }
 
           if (!tiny && (room.type === 'master_bedroom' || room.type === 'bedroom' || room.type === 'guest_room') && fw > 35 && fh > 30) {
-            // Bed (centred, rear 60%)
-            const bw = Math.min(fw * 0.7, 55), bh2 = Math.min(fh * 0.55, 42);
-            furniture.push({ key:'bed', x: rx+(fw-bw)/2, y: ry+fh*0.35, w: bw, h: bh2, fill:'#E9D5FF', stroke:'#7C3AED', round:3 });
-            // Pillow line
-            furniture.push({ key:'pil', x: rx+(fw-bw)/2+4, y: ry+fh*0.35+3, w: bw-8, h: 7, fill:'#F5F3FF', stroke:'#A78BFA', round:2 });
+            const bw = Math.min(fw * 0.72, 58), bh2 = Math.min(fh * 0.52, 44);
+            const bx2 = rx + (fw - bw) / 2, by2 = ry + fh * 0.3;
+            // Bed frame
+            furniture.push({ key:'bed', x: bx2, y: by2, w: bw, h: bh2, fill:'#EDE9FE', stroke:'#7C3AED', round:4 });
+            // Headboard
+            furniture.push({ key:'hb', x: bx2+3, y: by2+2, w: bw-6, h: bh2*0.2, fill:'#C4B5FD', stroke:'#7C3AED', round:3 });
+            // Left pillow
+            furniture.push({ key:'p1', x: bx2+5, y: by2+bh2*0.22+1, w: bw*0.35-3, h: bh2*0.22, fill:'#F5F3FF', stroke:'#A78BFA', round:3 });
+            // Right pillow
+            furniture.push({ key:'p2', x: bx2+bw*0.53, y: by2+bh2*0.22+1, w: bw*0.35-3, h: bh2*0.22, fill:'#F5F3FF', stroke:'#A78BFA', round:3 });
+            // Side table (if wide enough)
+            if (fw > 50) {
+              furniture.push({ key:'ns', x: bx2-8, y: by2+3, w: 7, h: 8, fill:'#DDD6FE', stroke:'#7C3AED', round:2 });
+            }
           }
 
           if (!tiny && room.type === 'bathroom' && fw > 22 && fh > 22) {
-            // Toilet (small rect at rear)
-            furniture.push({ key:'bt', x: rx+P, y: ry+fh-P-14, w: 11, h: 14, fill:'#CFFAFE', stroke:'#0891B2', round:3 });
-            // Sink
-            furniture.push({ key:'bsi', x: rx+P, y: ry+P, w: 10, h: 10, fill:'#A5F3FC', stroke:'#0891B2', round:2 });
+            // Toilet cistern (tank - thin rect at back)
+            furniture.push({ key:'btc', x: rx+P,   y: ry+fh-P-17, w: 12, h: 4,  fill:'#BAE6FD', stroke:'#0891B2', round:1 });
+            // Toilet bowl (oval-ish)
+            furniture.push({ key:'btb', x: rx+P+1, y: ry+fh-P-13, w: 10, h: 13, fill:'#E0F9FF', stroke:'#0891B2', round:5 });
+            // Washbasin (front corner)
+            furniture.push({ key:'bwb', x: rx+P, y: ry+P, w: 11, h: 11, fill:'#E0F2FE', stroke:'#0891B2', round:4 });
+            // Basin drain
+            furniture.push({ type:'circle', key:'bdr', cx: rx+P+5.5, cy: ry+P+5.5, r:2, fill:'#BAE6FD', stroke:'#0891B2' });
+            // Tap (small rect)
+            furniture.push({ key:'btp', x: rx+P+4, y: ry+P-1.5, w:3, h:2.5, fill:'#94A3B8', stroke:'#64748B', round:1 });
           }
 
           return (
             <Group key={i}>
               <Rect x={rx} y={ry} width={rw} height={rh}
-                fill={s.fill} stroke={s.stroke} strokeWidth={1.2} cornerRadius={2}
+                fill={s.fill} stroke={s.stroke} strokeWidth={1.5} cornerRadius={2}
               />
               {/* Furniture */}
-              {furniture.map(f => (
-                <Rect key={f.key} x={f.x} y={f.y} width={f.w} height={f.h}
-                  fill={f.fill} stroke={f.stroke} strokeWidth={0.8} cornerRadius={f.round || 0}
-                />
-              ))}
+              {furniture.map(f => f.type === 'circle'
+                ? <Circle key={f.key} x={f.cx} y={f.cy} radius={f.r} fill={f.fill} stroke={f.stroke} strokeWidth={0.8} />
+                : <Rect key={f.key} x={f.x} y={f.y} width={f.w} height={f.h} fill={f.fill} stroke={f.stroke} strokeWidth={0.8} cornerRadius={f.round || 0} />
+              )}
               {/* Room label */}
               <Text
                 x={rx + 3} y={cy - (small ? 6 : 8)}
@@ -397,52 +433,71 @@ function FloorPlanCanvas({ layout, width, height }) {
           );
         })}
 
-        {/* ── Parking area (overlays the front setback zone) ── */}
+        {/* ── Parking area ── */}
         {layout.parking && (() => {
-          const p   = layout.parking;
-          const ppx = v => ox + v * scale;
-          const ppy = v => oy + v * scale;
-          const pw  = p.width  * scale;
-          const ph  = Math.max(12, p.height * scale);
+          const p    = layout.parking;
+          const ppx  = v => ox + v * scale;
+          const ppy  = v => oy + v * scale;
+          const pw   = p.width  * scale;
+          const ph   = Math.max(18, p.height * scale);
           const cars = p.cars || 1;
+          const bayW = pw / cars;
           return (
             <Group key="parking">
               {/* Background */}
               <Rect x={ppx(p.x)} y={ppy(p.y)} width={pw} height={ph}
-                fill="#CBD5E1" stroke="#334155" strokeWidth={1.5} cornerRadius={2}
+                fill="#E2E8F0" stroke="#334155" strokeWidth={1.5} cornerRadius={2}
               />
-              {/* Diagonal hatching */}
-              {Array.from({ length: Math.ceil(pw / 8) + 4 }).map((_, i) => (
-                <Line key={i}
-                  points={[ppx(p.x) + i * 8 - ph, ppy(p.y),
-                           ppx(p.x) + i * 8,       ppy(p.y) + ph]}
-                  stroke="#94A3B8" strokeWidth={0.8}
-                />
-              ))}
-              {/* Car bays */}
-              {Array.from({ length: cars }).map((_, ci) => (
-                <Group key={ci}>
-                  <Rect
-                    x={ppx(p.x) + ci * (pw / cars) + 2}
-                    y={ppy(p.y) + 2}
-                    width={pw / cars - 4} height={ph - 4}
-                    fill="rgba(255,255,255,0.45)" stroke="#64748B"
-                    strokeWidth={0.8} cornerRadius={1} dash={[3,2]}
-                  />
-                  <Text
-                    x={ppx(p.x) + ci * (pw / cars)}
-                    y={ppy(p.y) + ph / 2 - 4}
-                    width={pw / cars}
-                    text="🚗" fontSize={10}
-                    fontFamily="Arial" align="center"
-                  />
-                </Group>
-              ))}
-              {/* PARKING label */}
-              <Text x={ppx(p.x)} y={ppy(p.y) - 14}
+              {/* Per-bay: bay divider + top-down car silhouette */}
+              {Array.from({ length: cars }).map((_, ci) => {
+                const bx = ppx(p.x) + ci * bayW;
+                const by = ppy(p.y);
+                const cw = bayW - 4, ch = ph - 4;
+                const cx2 = bx + 2, cy2 = by + 2;
+                // Car body proportions
+                const ww2 = cw * 0.18, wh2 = ch * 0.18;  // wheel size
+                return (
+                  <Group key={ci}>
+                    {/* Bay outline */}
+                    <Rect x={cx2} y={cy2} width={cw} height={ch}
+                      fill="#F8FAFC" stroke="#64748B" strokeWidth={1} cornerRadius={2}
+                    />
+                    {/* Bay divider line */}
+                    {ci > 0 && <Line points={[bx, by, bx, by+ph]} stroke="#475569" strokeWidth={1} />}
+                    {/* ── Car body ── */}
+                    <Rect
+                      x={cx2 + cw*0.12} y={cy2 + ch*0.08}
+                      width={cw*0.76} height={ch*0.84}
+                      fill="#CBD5E1" stroke="#475569" strokeWidth={1} cornerRadius={3}
+                    />
+                    {/* Windscreen (front) */}
+                    <Line
+                      points={[cx2+cw*0.18, cy2+ch*0.22, cx2+cw*0.82, cy2+ch*0.22]}
+                      stroke="#94A3B8" strokeWidth={1}
+                    />
+                    {/* Rear window */}
+                    <Line
+                      points={[cx2+cw*0.18, cy2+ch*0.78, cx2+cw*0.82, cy2+ch*0.78]}
+                      stroke="#94A3B8" strokeWidth={1}
+                    />
+                    {/* 4 wheels */}
+                    <Rect x={cx2+cw*0.05}  y={cy2+ch*0.1}  width={ww2} height={wh2} fill="#334155" stroke="#1E293B" strokeWidth={0.5} cornerRadius={1} />
+                    <Rect x={cx2+cw*0.05}  y={cy2+ch*0.72} width={ww2} height={wh2} fill="#334155" stroke="#1E293B" strokeWidth={0.5} cornerRadius={1} />
+                    <Rect x={cx2+cw*0.77}  y={cy2+ch*0.1}  width={ww2} height={wh2} fill="#334155" stroke="#1E293B" strokeWidth={0.5} cornerRadius={1} />
+                    <Rect x={cx2+cw*0.77}  y={cy2+ch*0.72} width={ww2} height={wh2} fill="#334155" stroke="#1E293B" strokeWidth={0.5} cornerRadius={1} />
+                    {/* P badge */}
+                    <Text x={cx2} y={cy2 + ch/2 - 5} width={cw}
+                      text="P" fontSize={Math.max(7, Math.min(12, cw*0.35))}
+                      fontStyle="bold" fontFamily="Arial" fill="#1E40AF" align="center"
+                    />
+                  </Group>
+                );
+              })}
+              {/* PARKING label above */}
+              <Text x={ppx(p.x)} y={ppy(p.y) - 13}
                 width={pw} align="center"
                 text={`PARKING  (${cars} car${cars > 1 ? 's' : ''})`}
-                fontSize={9} fontStyle="bold" fontFamily="Arial" fill="#1E293B"
+                fontSize={8} fontStyle="bold" fontFamily="Arial" fill="#1E293B"
               />
             </Group>
           );
@@ -503,47 +558,91 @@ function FloorPlanCanvas({ layout, width, height }) {
           );
         })}
 
-        {/* ── Windows ── */}
+        {/* ── Windows (architectural symbol: 3 parallel lines in wall opening) ── */}
         {(layout.windows || []).map((win, i) => {
-          const wx = px(win.x);
-          const wy = py(win.y);
-          const ww = Math.max(3, win.width  * scale);
-          const wh = Math.max(3, win.height * scale);
+          const wx  = px(win.x);
+          const wy  = py(win.y);
+          const ww  = Math.max(4, win.width  * scale);
+          const wh  = Math.max(4, win.height * scale);
+          const horiz = ww >= wh; // horizontal window opening?
           return (
-            <Rect key={`w${i}`}
-              x={wx} y={wy} width={ww} height={wh}
-              fill="#BAE6FD" stroke="#38BDF8" strokeWidth={1} dash={[2, 2]}
-            />
+            <Group key={`w${i}`}>
+              {/* White opening in wall */}
+              <Rect x={wx} y={wy} width={ww} height={wh} fill="#FFFFFF" stroke="none" />
+              {/* Three parallel lines (glass panes) */}
+              {horiz ? (<>
+                <Line points={[wx,      wy+wh/2-1.5, wx+ww, wy+wh/2-1.5]} stroke="#38BDF8" strokeWidth={1.2} />
+                <Line points={[wx,      wy+wh/2+0,   wx+ww, wy+wh/2+0  ]} stroke="#0EA5E9" strokeWidth={1.2} />
+                <Line points={[wx,      wy+wh/2+1.5, wx+ww, wy+wh/2+1.5]} stroke="#38BDF8" strokeWidth={1.2} />
+                {/* End caps */}
+                <Line points={[wx,    wy, wx,    wy+wh]} stroke="#0F172A" strokeWidth={1.5} />
+                <Line points={[wx+ww, wy, wx+ww, wy+wh]} stroke="#0F172A" strokeWidth={1.5} />
+              </>) : (<>
+                <Line points={[wx+ww/2-1.5, wy, wx+ww/2-1.5, wy+wh]} stroke="#38BDF8" strokeWidth={1.2} />
+                <Line points={[wx+ww/2+0,   wy, wx+ww/2+0,   wy+wh]} stroke="#0EA5E9" strokeWidth={1.2} />
+                <Line points={[wx+ww/2+1.5, wy, wx+ww/2+1.5, wy+wh]} stroke="#38BDF8" strokeWidth={1.2} />
+                <Line points={[wx, wy,    wx+ww, wy   ]} stroke="#0F172A" strokeWidth={1.5} />
+                <Line points={[wx, wy+wh, wx+ww, wy+wh]} stroke="#0F172A" strokeWidth={1.5} />
+              </>)}
+            </Group>
           );
         })}
 
         {/* ── Staircase ── */}
         {layout.staircase && (() => {
-          const st = layout.staircase;
-          const sx2 = px(st.x), sy2 = py(st.y);
-          const sw  = st.width  * scale;
-          const sh  = st.height * scale;
-          const steps = 6;
+          const st   = layout.staircase;
+          const sx2  = px(st.x), sy2 = py(st.y);
+          const sw   = st.width  * scale;
+          const sh   = st.height * scale;
+          const steps = 9;
+          const treadH = (sh - 4) / steps;
+          // break line sits at 55% from bottom
+          const breakY = sy2 + sh - 2 - Math.round(steps * 0.55) * treadH;
           return (
             <Group key="stair">
+              {/* Boundary */}
               <Rect x={sx2} y={sy2} width={sw} height={sh}
-                fill="#E2E8F0" stroke="#94A3B8" strokeWidth={1}
+                fill="#F1F5F9" stroke="#475569" strokeWidth={1.5}
               />
-              {Array.from({ length: steps - 1 }).map((_, si) => (
-                <Line key={si}
-                  points={[sx2, sy2 + sh / steps * (si + 1), sx2 + sw, sy2 + sh / steps * (si + 1)]}
-                  stroke="#94A3B8" strokeWidth={0.7}
-                />
-              ))}
-              <Text
-                x={sx2 + 1} y={sy2 + sh / 2 - 8}
-                width={sw - 2} text="↑" fontSize={10}
-                fontFamily="Arial" fill="#475569" align="center"
+              {/* Step treads (solid below break line) */}
+              {Array.from({ length: steps }).map((_, si) => {
+                const lineY = sy2 + sh - 2 - (si + 1) * treadH;
+                const above = lineY < breakY;
+                return (
+                  <Line key={si}
+                    points={[sx2 + 2, lineY, sx2 + sw - 2, lineY]}
+                    stroke={above ? '#94A3B8' : '#64748B'}
+                    strokeWidth={above ? 0.6 : 0.9}
+                    dash={above ? [2, 1.5] : []}
+                  />
+                );
+              })}
+              {/* Architectural break line (zigzag) */}
+              <Line
+                points={[
+                  sx2,          breakY - 3,
+                  sx2+sw*0.22,  breakY + 3,
+                  sx2+sw*0.44,  breakY - 3,
+                  sx2+sw*0.66,  breakY + 3,
+                  sx2+sw*0.88,  breakY - 3,
+                  sx2+sw,       breakY + 3,
+                ]}
+                stroke="#94A3B8" strokeWidth={1.2} lineCap="round" lineJoin="round"
               />
-              <Text
-                x={sx2 + 1} y={sy2 + sh / 2 + 2}
-                width={sw - 2} text="STAIR" fontSize={6}
-                fontFamily="Arial" fill="#475569" align="center" wrap="none"
+              {/* Direction arrow shaft */}
+              <Line
+                points={[sx2+sw/2, sy2+sh-6, sx2+sw/2, sy2+10]}
+                stroke="#334155" strokeWidth={1.5} lineCap="round"
+              />
+              {/* Arrow head */}
+              <Line
+                points={[sx2+sw/2-5, sy2+18, sx2+sw/2, sy2+10, sx2+sw/2+5, sy2+18]}
+                stroke="#334155" strokeWidth={1.5} lineCap="round" lineJoin="round"
+              />
+              {/* UP label */}
+              <Text x={sx2+1} y={sy2+2} width={sw-2}
+                text="UP" fontSize={7} fontStyle="bold"
+                fontFamily="Arial" fill="#334155" align="center"
               />
             </Group>
           );
