@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api from '../services/api';
+import AILoadingScreen from '../components/AILoadingScreen';
 
 const Home = () => {
   const navigate = useNavigate();
@@ -96,6 +97,8 @@ const Home = () => {
   };
 
   return (
+    <>
+    {loading && <AILoadingScreen />}
     <div className="max-w-4xl mx-auto">
       <div className="bg-white shadow-md rounded-lg p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-6">AutoArchitect Floor Plan Generator</h1>
@@ -334,6 +337,7 @@ const Home = () => {
         </form>
       </div>
     </div>
+    </>
   );
 };
 
