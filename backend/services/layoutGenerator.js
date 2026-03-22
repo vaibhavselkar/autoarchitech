@@ -81,11 +81,15 @@ async function generateLayoutVariations(plot, requirements, preferences = {}, va
   const results = [];
   for (let i = 0; i < Math.min(aiLayouts.length, variations); i++) {
     const ai = aiLayouts[i];
-    if (ai.rooms && ai.rooms.length > 0 && validateAIRooms(ai.rooms, buildable)) {
-      const fixedRooms = enforceRoomCounts(ai.rooms, req, buildable);
-      results.push(buildVariationFromAIRooms(plotData, prefs, buildable, { ...ai, rooms: fixedRooms }, i));
-    } else {
-      console.warn(`AI variation ${i + 1} failed validation — skipping`);
+    if (ai.rooms && ai.rooms.length > 0) {
+      resolveOverlaps(ai.rooms, buildable);
+      if (validateAIRooms(ai.rooms, buildable)) {
+        const fixedRooms = enforceRoomCounts(ai.rooms, req, buildable);
+        resolveOverlaps(fixedRooms, buildable);
+        results.push(buildVariationFromAIRooms(plotData, prefs, buildable, { ...ai, rooms: fixedRooms }, i));
+      } else {
+        console.warn(`AI variation ${i + 1} failed validation — skipping`);
+      }
     }
   }
 
@@ -146,6 +150,60 @@ function enforceRoomCounts(rooms, req, buildable) {
   return result;
 }
 
+// ─── Auto-resolve room overlaps by pushing rooms apart ────────────────────────
+
+function resolveOverlaps(rooms, buildable) {
+  const W = buildable.width, H = buildable.length;
+  const MAX_ITER = 30;
+
+  for (let iter = 0; iter < MAX_ITER; iter++) {
+    let anyOverlap = false;
+
+    for (let i = 0; i < rooms.length; i++) {
+      for (let j = i + 1; j < rooms.length; j++) {
+        const a = rooms[i], b = rooms[j];
+
+        const ox = Math.min(a.x + a.width,  b.x + b.width)  - Math.max(a.x, b.x);
+        const oy = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+
+        if (ox <= 0.3 || oy <= 0.3) continue;   // touching walls are fine
+        anyOverlap = true;
+
+        // Resolve along the axis with smaller penetration
+        if (ox <= oy) {
+          const push = ox / 2 + 0.3;
+          if (a.x + a.width / 2 <= b.x + b.width / 2) {
+            a.x = Math.max(0, a.x - push);
+            b.x = Math.min(W - b.width, b.x + push);
+          } else {
+            a.x = Math.min(W - a.width, a.x + push);
+            b.x = Math.max(0, b.x - push);
+          }
+        } else {
+          const push = oy / 2 + 0.3;
+          if (a.y + a.height / 2 <= b.y + b.height / 2) {
+            a.y = Math.max(0, a.y - push);
+            b.y = Math.min(H - b.height, b.y + push);
+          } else {
+            a.y = Math.min(H - a.height, a.y + push);
+            b.y = Math.max(0, b.y - push);
+          }
+        }
+      }
+    }
+
+    if (!anyOverlap) break;
+  }
+
+  // Final bounds clamp
+  for (const r of rooms) {
+    r.x = Math.max(0, Math.min(W - r.width,  r2(r.x)));
+    r.y = Math.max(0, Math.min(H - r.height, r2(r.y)));
+  }
+
+  return rooms;
+}
+
 // ─── Validate AI-provided rooms ───────────────────────────────────────────────
 
 function validateAIRooms(rooms, buildable) {
@@ -153,21 +211,21 @@ function validateAIRooms(rooms, buildable) {
   const W = buildable.width, H = buildable.length;
 
   for (const r of rooms) {
-    if (!ROOM_LABELS[r.type])           return false;   // unknown type
-    if (r.width < 3 || r.height < 3)   return false;   // too small
-    if (r.x < -0.5 || r.y < -0.5)      return false;   // out of bounds left/top
-    if (r.x + r.width  > W + 0.5)      return false;   // out of bounds right
-    if (r.y + r.height > H + 0.5)      return false;   // out of bounds bottom
+    if (!ROOM_LABELS[r.type])          return false;   // unknown type
+    if (r.width < 3 || r.height < 3)  return false;   // too small
+    if (r.x < -1 || r.y < -1)         return false;   // out of bounds left/top
+    if (r.x + r.width  > W + 1)       return false;   // out of bounds right
+    if (r.y + r.height > H + 1)       return false;   // out of bounds bottom
   }
 
-  // Check for overlaps (1ft tolerance for shared walls)
+  // Check for significant overlaps (2ft tolerance — allows shared walls + rounding)
   for (let i = 0; i < rooms.length; i++) {
     for (let j = i + 1; j < rooms.length; j++) {
       const a = rooms[i], b = rooms[j];
-      const overlapX = a.x + a.width  - 1 > b.x && b.x + b.width  - 1 > a.x;
-      const overlapY = a.y + a.height - 1 > b.y && b.y + b.height - 1 > a.y;
-      if (overlapX && overlapY) {
-        console.log(`AI overlap: ${a.type} and ${b.type}`);
+      const ox = Math.min(a.x + a.width,  b.x + b.width)  - Math.max(a.x, b.x);
+      const oy = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+      if (ox > 2 && oy > 2) {
+        console.log(`AI overlap remaining after fix: ${a.type} and ${b.type} (${ox.toFixed(1)}×${oy.toFixed(1)}ft)`);
         return false;
       }
     }
