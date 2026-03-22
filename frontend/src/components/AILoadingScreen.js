@@ -312,7 +312,7 @@ export default function AILoadingScreen() {
 
           {/* Tip */}
           <div style={{
-            fontSize: 11, color: '#1E293B',
+            fontSize: 11,
             background: 'rgba(99,102,241,0.07)',
             border: '1px solid rgba(99,102,241,0.12)',
             borderRadius: 8, padding: '8px 16px',
