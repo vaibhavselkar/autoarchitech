@@ -93,27 +93,8 @@ async function generateLayoutVariations(plot, requirements, preferences = {}, va
     if (results.length > 0) return results;
   }
 
-  // ── Fallback: rule-based (only when AI_ONLY = false) ─────────────────────
-  if (AI_ONLY) {
-    // Retry once with a simpler prompt before giving up
-    let retry = null;
-    try {
-      retry = await geminiService.generateRoomPlacements(plot, requirements, preferences, variations);
-    } catch (_) {}
-    if (retry && retry.length > 0) {
-      const results = [];
-      for (let i = 0; i < Math.min(retry.length, variations); i++) {
-        const ai = retry[i];
-        if (ai.rooms && ai.rooms.length > 0) {
-          const fixedRooms = enforceRoomCounts(ai.rooms, req, buildable);
-          results.push(buildVariationFromAIRooms(plotData, prefs, buildable, { ...ai, rooms: fixedRooms }, i));
-        }
-      }
-      if (results.length > 0) return results;
-    }
-    throw new Error('AI floor plan generation failed. Please try again in a moment.');
-  }
-
+  // ── Fallback: rule-based ───────────────────────────────────────────────────
+  // Used when: AI_ONLY=false  OR  Gemini is unavailable (bad key, quota, timeout)
   let aiParams = null;
   try {
     aiParams = await geminiService.generateDesignParameters(plot, requirements, preferences, variations);
