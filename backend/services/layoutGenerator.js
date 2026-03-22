@@ -60,53 +60,119 @@ async function generateLayout(plot, requirements, preferences = {}) {
   return layout;
 }
 
+// ── Set to false to re-enable rule-based fallback plans ──────────────────────
+const AI_ONLY = process.env.AI_ONLY !== 'false';
+
 async function generateLayoutVariations(plot, requirements, preferences = {}, variations = 5) {
   const plotData  = parsePlot(plot);
   const req       = parseRequirements(requirements);
   const prefs     = parsePreferences(preferences);
   const buildable = getBuildable(plotData);
 
-  // ── STEP 1: Try AI-first approach (Gemini provides full room coordinates) ──
+  // ── AI-FIRST: Gemini provides full room coordinates ───────────────────────
   let aiLayouts = null;
   try {
     aiLayouts = await geminiService.generateRoomPlacements(plot, requirements, preferences, variations);
   } catch (_) { /* fall through */ }
 
   if (aiLayouts && aiLayouts.length > 0) {
-    // Use AI room placements for as many variations as pass validation
     const results = [];
     for (let i = 0; i < Math.min(aiLayouts.length, variations); i++) {
       const ai = aiLayouts[i];
       if (ai.rooms && ai.rooms.length > 0 && validateAIRooms(ai.rooms, buildable)) {
-        results.push(buildVariationFromAIRooms(plotData, prefs, buildable, ai, i));
-      } else {
-        // This variation failed validation — fall back to rule-based for this slot
-        console.log(`AI variation ${i + 1} failed validation, using rule-based fallback`);
-        const fallback = defaultParams(1, i)[0];
-        results.push(buildVariationRuleBased(plotData, req, prefs, buildable, fallback, i));
+        // Patch room counts to exactly match requirements
+        const fixedRooms = enforceRoomCounts(ai.rooms, req, buildable);
+        results.push(buildVariationFromAIRooms(plotData, prefs, buildable, { ...ai, rooms: fixedRooms }, i));
+      } else if (!AI_ONLY) {
+        console.log(`AI variation ${i + 1} failed validation — using rule-based fallback`);
+        results.push(buildVariationRuleBased(plotData, req, prefs, buildable, defaultParams(1, i)[0], i));
       }
+      // In AI_ONLY mode: skip invalid variations (don't pad with identical rule-based plans)
     }
-    // Fill any remaining slots
-    while (results.length < variations) {
-      const i = results.length;
-      const fallback = defaultParams(1, i)[0];
-      results.push(buildVariationRuleBased(plotData, req, prefs, buildable, fallback, i));
-    }
-    return results;
+
+    if (results.length > 0) return results;
   }
 
-  // ── STEP 2: Fallback — AI gives design params, rule-based places rooms ──
+  // ── Fallback: rule-based (only when AI_ONLY = false) ─────────────────────
+  if (AI_ONLY) {
+    // Retry once with a simpler prompt before giving up
+    let retry = null;
+    try {
+      retry = await geminiService.generateRoomPlacements(plot, requirements, preferences, variations);
+    } catch (_) {}
+    if (retry && retry.length > 0) {
+      const results = [];
+      for (let i = 0; i < Math.min(retry.length, variations); i++) {
+        const ai = retry[i];
+        if (ai.rooms && ai.rooms.length > 0) {
+          const fixedRooms = enforceRoomCounts(ai.rooms, req, buildable);
+          results.push(buildVariationFromAIRooms(plotData, prefs, buildable, { ...ai, rooms: fixedRooms }, i));
+        }
+      }
+      if (results.length > 0) return results;
+    }
+    throw new Error('AI floor plan generation failed. Please try again in a moment.');
+  }
+
   let aiParams = null;
   try {
     aiParams = await geminiService.generateDesignParameters(plot, requirements, preferences, variations);
-  } catch (_) { /* fall through */ }
-
+  } catch (_) {}
   if (!aiParams || aiParams.length === 0) aiParams = defaultParams(variations);
   while (aiParams.length < variations) aiParams.push(defaultParams(1, aiParams.length)[0]);
-
   return aiParams.slice(0, variations).map((params, i) =>
     buildVariationRuleBased(plotData, req, prefs, buildable, params, i)
   );
+}
+
+// ── Ensure AI rooms exactly match user requirements ───────────────────────────
+function enforceRoomCounts(rooms, req, buildable) {
+  const result = [...rooms];
+  const count  = (type) => result.filter(r => r.type === type).length;
+
+  const bW = buildable.width, bH = buildable.length;
+
+  // Helper: add a room if missing (place at a rough position, AI will have placed better ones)
+  const addRoom = (type, w, h) => {
+    // Find a y position near the rear that is not occupied
+    const usedY = result.map(r => r.y + r.height);
+    const maxY  = Math.max(0, ...usedY);
+    const x = Math.min(result.length % 2 === 0 ? 0 : Math.floor(bW / 2), bW - w);
+    const y = Math.min(maxY, bH - h);
+    result.push({ type, x: Math.max(0, x), y: Math.max(0, y), width: w, height: h });
+  };
+
+  // Bathrooms
+  const wantedBaths = parseInt(req.bathrooms || 2);
+  const hasBaths    = count('bathroom');
+  if (hasBaths < wantedBaths) {
+    for (let i = hasBaths; i < wantedBaths; i++) addRoom('bathroom', 7, 9);
+  } else if (hasBaths > wantedBaths) {
+    let removed = 0;
+    for (let i = result.length - 1; i >= 0 && removed < hasBaths - wantedBaths; i--) {
+      if (result[i].type === 'bathroom') { result.splice(i, 1); removed++; }
+    }
+  }
+
+  // Bedrooms (total = master + regular)
+  const wantedBeds = parseInt(req.bedrooms || 2);
+  const hasMaster  = count('master_bedroom');
+  const hasRegular = count('bedroom');
+  const hasTotalBeds = hasMaster + hasRegular;
+
+  if (hasMaster === 0 && wantedBeds >= 1) addRoom('master_bedroom', 14, 13);
+  const wantedRegular = Math.max(0, wantedBeds - 1);
+  const diffRegular   = wantedRegular - count('bedroom');
+  if (diffRegular > 0) {
+    for (let i = 0; i < diffRegular; i++) addRoom('bedroom', 12, 11);
+  } else if (diffRegular < 0) {
+    let removed = 0;
+    for (let i = result.length - 1; i >= 0 && removed < -diffRegular; i--) {
+      if (result[i].type === 'bedroom') { result.splice(i, 1); removed++; }
+    }
+  }
+
+  return result;
 }
 
 // ─── Validate AI-provided rooms ───────────────────────────────────────────────
@@ -894,7 +960,7 @@ function generateDoors(rooms, _plotData, buildable, prefs) {
   );
 
   // 7. Passage door on each private room (front wall toward living zone)
-  const privateTypes = ['master_bedroom', 'bedroom', 'study', 'guest_room', 'prayer_room'];
+  const privateTypes = ['master_bedroom', 'bedroom', 'study', 'guest_room', 'prayer_room', 'utility_room'];
   privateTypes.forEach(bt =>
     (byType[bt]||[]).forEach(r => {
       doors.push({
@@ -903,6 +969,27 @@ function generateDoors(rooms, _plotData, buildable, prefs) {
       });
     })
   );
+
+  // 8. Guarantee every room has at least one door ──────────────────────────
+  // Check each room — if no existing door lies on any of its 4 walls, add one
+  rooms.forEach(r => {
+    const hasDoor = doors.some(d => {
+      const TOL = 1.5;
+      const onFront = Math.abs(d.y - r.y) < TOL           && d.x >= r.x - TOL && d.x < r.x + r.width;
+      const onBack  = Math.abs(d.y - (r.y + r.height)) < TOL && d.x >= r.x - TOL && d.x < r.x + r.width;
+      const onLeft  = Math.abs(d.x - r.x) < TOL           && d.y >= r.y - TOL && d.y < r.y + r.height;
+      const onRight = Math.abs(d.x - (r.x + r.width)) < TOL && d.y >= r.y - TOL && d.y < r.y + r.height;
+      return onFront || onBack || onLeft || onRight;
+    });
+    if (!hasDoor) {
+      // Place door at 30% across the front wall of the room
+      doors.push({
+        x: r.x + r.width * 0.3, y: r.y,
+        width: r.type === 'bathroom' ? 2.5 : DOOR_W,
+        height: 7, orientation: 'horizontal', type: 'room'
+      });
+    }
+  });
 
   return doors;
 }

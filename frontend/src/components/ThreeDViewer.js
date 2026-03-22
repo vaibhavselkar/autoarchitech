@@ -483,10 +483,9 @@ function drawDoors(scene, doors, s, WALL_H) {
       addBox(dx + dw/2, dh, dz, dw + FT*2, FT*1.5, FT*1.5, frameMat);
 
       if (isSlide) {
-        // Sliding door — leaf sits in wall plane
         addBox(dx + dw/2, dh/2, dz, dw, dh, LT, leafMat);
       } else {
-        // Swing door — pivot at left jamb, open ~55°
+        const openAngle = isMain ? -Math.PI / 2 : -Math.PI / 2.5; // main=90°, room=72°
         const pivot = new THREE.Group();
         pivot.position.set(dx, 0, dz);
         scene.add(pivot);
@@ -494,7 +493,7 @@ function drawDoors(scene, doors, s, WALL_H) {
         const leaf = new THREE.Mesh(new THREE.BoxGeometry(dw, dh - FT, LT), leafMat);
         leaf.position.set(dw/2, dh/2, 0);
         pivot.add(leaf);
-        pivot.rotation.y = -Math.PI / 3.2;  // 56° open
+        pivot.rotation.y = openAngle;
 
         // Swing arc on floor
         const pts = [];
@@ -526,6 +525,7 @@ function drawDoors(scene, doors, s, WALL_H) {
       if (isSlide) {
         addBox(dx, dh/2, dz + dw/2, LT, dh, dw, leafMat);
       } else {
+        const openAngle = isMain ? Math.PI / 2 : Math.PI / 2.5;
         const pivot = new THREE.Group();
         pivot.position.set(dx, 0, dz);
         scene.add(pivot);
@@ -533,7 +533,7 @@ function drawDoors(scene, doors, s, WALL_H) {
         const leaf = new THREE.Mesh(new THREE.BoxGeometry(LT, dh - FT, dw), leafMat);
         leaf.position.set(0, dh/2, dw/2);
         pivot.add(leaf);
-        pivot.rotation.y = Math.PI / 3.2;
+        pivot.rotation.y = openAngle;
 
         const pts = [];
         const steps = 20;

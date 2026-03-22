@@ -206,31 +206,28 @@ Recommendations: [bullets]`;
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
   _buildRoomList(req, bW, bL) {
-    const lines = [];
-    if (req.balcony !== false)
-      lines.push(`• balcony: 1 room, width=${bW}ft, height=5-6ft (full-width front strip)`);
-    if (req.living_room > 0 || req.living_room !== false)
-      lines.push(`• living_room: 1 room, width=14-${bW}ft, height=12-16ft`);
-    if (req.dining > 0 || req.dining !== false)
-      lines.push(`• dining: 1 room, width=11-15ft, height=10-13ft`);
-    if (req.kitchen > 0 || req.kitchen !== false)
-      lines.push(`• kitchen: 1 room, width=10-14ft, height=10-12ft`);
-    const beds = parseInt(req.bedrooms || 2);
-    if (beds > 0 && req.master_bedroom !== false)
-      lines.push(`• master_bedroom: 1 room, width=13-16ft, height=12-15ft`);
-    if (beds > 1)
-      lines.push(`• bedroom: ${beds - 1} room(s), width=11-14ft, height=10-13ft each`);
+    const beds  = parseInt(req.bedrooms  || 2);
     const baths = parseInt(req.bathrooms || 2);
-    if (baths > 0)
-      lines.push(`• bathroom: ${baths} room(s), width≥6ft, height≥8ft each (HARD MINIMUM)`);
-    if (parseInt(req.study || 0) > 0)
-      lines.push(`• study: 1 room, width=10-13ft, height=10-12ft`);
-    if (req.prayer_room)
-      lines.push(`• prayer_room: 1 room, width=8-12ft, height=8-10ft`);
-    if (parseInt(req.guest_room || 0) > 0)
-      lines.push(`• guest_room: 1 room, width=11-14ft, height=10-12ft`);
-    if (parseInt(req.utility_room || 0) > 0)
-      lines.push(`• utility_room: 1 room, width=6-10ft, height=8-10ft`);
+    const lines = ['INCLUDE EXACTLY THESE ROOMS — no more, no fewer:'];
+
+    lines.push(`• 1× balcony       — full-width (${bW}ft), height 5-6ft, placed at y=0 (front)`);
+    lines.push(`• 1× living_room   — width 14-${Math.min(bW, 22)}ft, height 12-16ft`);
+    lines.push(`• 1× dining        — width 11-15ft, height 10-13ft`);
+    lines.push(`• 1× kitchen       — width 10-14ft, height 10-12ft`);
+    lines.push(`• 1× master_bedroom — width 13-16ft, height 12-15ft`);
+    if (beds > 1) lines.push(`• ${beds - 1}× bedroom       — width 11-14ft, height 10-13ft each`);
+    lines.push(`• ${baths}× bathroom      — width ≥6ft, height ≥8ft EACH (NEVER SMALLER — this is a HARD rule)`);
+    if (parseInt(req.study  || 0) > 0)  lines.push(`• 1× study         — width 10-13ft, height 10-12ft`);
+    if (req.prayer_room)                lines.push(`• 1× prayer_room   — width 8-12ft, height 8-10ft`);
+    if (parseInt(req.guest_room || 0) > 0) lines.push(`• 1× guest_room   — width 11-14ft, height 10-12ft`);
+    if (parseInt(req.utility_room || 0) > 0) lines.push(`• 1× utility_room — width 6-10ft, height 8-10ft`);
+
+    const total = 4 + beds + baths
+      + (parseInt(req.study || 0) > 0 ? 1 : 0)
+      + (req.prayer_room ? 1 : 0)
+      + (parseInt(req.guest_room || 0) > 0 ? 1 : 0)
+      + (parseInt(req.utility_room || 0) > 0 ? 1 : 0);
+    lines.push(`TOTAL rooms per variation: ${total}`);
     return lines.join('\n');
   }
 

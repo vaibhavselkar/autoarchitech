@@ -195,23 +195,25 @@ function FloorPlanCanvas({ layout, width, height }) {
           <Group>
             <Rect x={ox} y={oy} width={plotPW} height={frontH}
               fill="#DCFCE7" stroke="#86EFAC" strokeWidth={0.5} />
-            {/* diagonal hatching */}
             {Array.from({ length: Math.ceil(plotPW / 8) + 2 }).map((_, i) => (
               <Line key={`fh${i}`}
                 points={[ox + i * 8 - frontH, oy,  ox + i * 8, oy + frontH]}
                 stroke="#BBF7D0" strokeWidth={0.8} lineCap="round"
               />
             ))}
-            <Text x={ox + 4} y={oy + Math.max(2, frontH / 2 - 8)}
+            {/* Only show second line if there's room */}
+            <Text x={ox + 4} y={oy + Math.max(2, frontH / 2 - (frontH > 16 ? 8 : 4))}
               width={plotPW - 8} align="center"
-              text="FRONT SETBACK" fontSize={8} fontStyle="bold"
-              fontFamily="Arial" fill="#166534"
+              text={frontH > 16 ? 'FRONT SETBACK' : `SETBACK (${sb.back}ft)`}
+              fontSize={8} fontStyle="bold" fontFamily="Arial" fill="#166534"
             />
-            <Text x={ox + 4} y={oy + Math.max(10, frontH / 2 + 1)}
-              width={plotPW - 8} align="center"
-              text={`Main Gate / Entry Zone  (${sb.back} ft)`} fontSize={7}
-              fontFamily="Arial" fill="#16A34A"
-            />
+            {frontH > 16 && (
+              <Text x={ox + 4} y={oy + frontH / 2 + 2}
+                width={plotPW - 8} align="center"
+                text={`Main Gate / Entry  (${sb.back} ft)`} fontSize={7}
+                fontFamily="Arial" fill="#16A34A"
+              />
+            )}
           </Group>
         )}
 
@@ -307,17 +309,64 @@ function FloorPlanCanvas({ layout, width, height }) {
           const rh  = room.height * scale;
           const cy  = ry + rh / 2;
 
-          // Pick label size based on room pixel size
           const tiny   = rw < 38 || rh < 26;
           const small  = rw < 60 || rh < 40;
           const label  = tiny ? tinyLabel(room.type) : shortLabel(room.type);
           const dimTxt = `${Math.round(room.width)}' × ${Math.round(room.height)}'`;
+
+          // ── Furniture symbols ─────────────────────────────────────────
+          const furniture = [];
+          const fw = rw, fh = rh; // alias for readability
+          const P = 4; // padding from wall
+
+          if (!tiny && room.type === 'kitchen' && fw > 30 && fh > 30) {
+            // Counter L-shape along back + right wall
+            furniture.push({ key:'kc1', x: rx+P, y: ry+fh-P-8, w: fw-P*2, h: 8, fill:'#A7F3D0', stroke:'#059669' });
+            furniture.push({ key:'kc2', x: rx+fw-P-8, y: ry+P, w: 8, h: fh-P*2-8, fill:'#A7F3D0', stroke:'#059669' });
+            // Sink circle on counter
+            furniture.push({ key:'ks', x: rx+P+8, y: ry+fh-P-8+1, w: 10, h: 6, fill:'#6EE7B7', stroke:'#059669', round:2 });
+          }
+
+          if (!tiny && (room.type === 'living_room') && fw > 40 && fh > 35) {
+            // Sofa against back wall
+            furniture.push({ key:'ls', x: rx+P, y: ry+fh*0.55, w: fw*0.55, h: fh*0.22, fill:'#BFDBFE', stroke:'#2563EB', round:3 });
+            // TV on front wall (thin rect)
+            furniture.push({ key:'ltv', x: rx+fw*0.2, y: ry+P+1, w: fw*0.45, h: 5, fill:'#1E293B', stroke:'#334155', round:1 });
+            // Coffee table
+            furniture.push({ key:'lct', x: rx+P+6, y: ry+fh*0.42, w: fw*0.3, h: fh*0.11, fill:'#FEF3C7', stroke:'#D97706', round:2 });
+          }
+
+          if (!tiny && (room.type === 'dining') && fw > 32 && fh > 28) {
+            // Dining table (centre)
+            furniture.push({ key:'dt', x: rx+fw*0.2, y: ry+fh*0.25, w: fw*0.6, h: fh*0.5, fill:'#FDE68A', stroke:'#D97706', round:3 });
+          }
+
+          if (!tiny && (room.type === 'master_bedroom' || room.type === 'bedroom' || room.type === 'guest_room') && fw > 35 && fh > 30) {
+            // Bed (centred, rear 60%)
+            const bw = Math.min(fw * 0.7, 55), bh2 = Math.min(fh * 0.55, 42);
+            furniture.push({ key:'bed', x: rx+(fw-bw)/2, y: ry+fh*0.35, w: bw, h: bh2, fill:'#E9D5FF', stroke:'#7C3AED', round:3 });
+            // Pillow line
+            furniture.push({ key:'pil', x: rx+(fw-bw)/2+4, y: ry+fh*0.35+3, w: bw-8, h: 7, fill:'#F5F3FF', stroke:'#A78BFA', round:2 });
+          }
+
+          if (!tiny && room.type === 'bathroom' && fw > 22 && fh > 22) {
+            // Toilet (small rect at rear)
+            furniture.push({ key:'bt', x: rx+P, y: ry+fh-P-14, w: 11, h: 14, fill:'#CFFAFE', stroke:'#0891B2', round:3 });
+            // Sink
+            furniture.push({ key:'bsi', x: rx+P, y: ry+P, w: 10, h: 10, fill:'#A5F3FC', stroke:'#0891B2', round:2 });
+          }
 
           return (
             <Group key={i}>
               <Rect x={rx} y={ry} width={rw} height={rh}
                 fill={s.fill} stroke={s.stroke} strokeWidth={1.2} cornerRadius={2}
               />
+              {/* Furniture */}
+              {furniture.map(f => (
+                <Rect key={f.key} x={f.x} y={f.y} width={f.w} height={f.h}
+                  fill={f.fill} stroke={f.stroke} strokeWidth={0.8} cornerRadius={f.round || 0}
+                />
+              ))}
               {/* Room label */}
               <Text
                 x={rx + 3} y={cy - (small ? 6 : 8)}
@@ -331,13 +380,12 @@ function FloorPlanCanvas({ layout, width, height }) {
                 wrap="none"
                 ellipsis
               />
-              {/* Dimension inside room (only if big enough) */}
               {!tiny && (
                 <Text
                   x={rx + 3} y={cy + (small ? 2 : 3)}
                   width={rw - 6}
                   text={dimTxt}
-                  fontSize={tiny ? 6 : 7}
+                  fontSize={7}
                   fontFamily="Arial"
                   fill="#6B7280"
                   align="center"
