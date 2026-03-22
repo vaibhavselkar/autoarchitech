@@ -12,7 +12,7 @@ const { planUtils } = require('../../shared/plan-schema');
 class GeminiService {
   constructor() {
     this.apiKey = process.env.GEMINI_API_KEY;
-    this.modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    this.modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
     if (this.apiKey) {
       this.genAI = new GoogleGenerativeAI(this.apiKey);
