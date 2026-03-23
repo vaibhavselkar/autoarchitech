@@ -137,7 +137,7 @@ export default function SVGFloorPlan({ layout }) {
   // Wall thickness in pixels (thinner at smaller scales)
   const WO = Math.max(4, Math.min(10, scale * 0.28));   // outer wall
   const WI = Math.max(3, Math.min(7,  scale * 0.18));   // inner wall
-  const DOOR_W = 3; // ft
+
 
   const facing    = (plot.facing || 'north').toUpperCase();
   const intWalls  = (layout.walls || []).filter(w => w.type === 'interior');
