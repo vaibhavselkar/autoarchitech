@@ -85,10 +85,12 @@ async function generateLayoutVariations(plot, requirements, preferences = {}, va
     if (ai.rooms && ai.rooms.length > 0) {
       resolveOverlaps(ai.rooms, buildable);
       trimOverlaps(ai.rooms, buildable);
+      fillGaps(ai.rooms, buildable);
       if (validateAIRooms(ai.rooms, buildable)) {
         const fixedRooms = enforceRoomCounts(ai.rooms, req, buildable);
         resolveOverlaps(fixedRooms, buildable);
         trimOverlaps(fixedRooms, buildable);
+        fillGaps(fixedRooms, buildable);
         results.push(buildVariationFromAIRooms(plotData, prefs, buildable, { ...ai, rooms: fixedRooms }, i));
       } else {
         console.warn(`AI variation ${i + 1} failed validation — skipping`);
@@ -414,6 +416,34 @@ function trimOverlaps(rooms, buildable) {
       }
     }
   }
+  return rooms;
+}
+
+// ─── Fill gaps left after trimming by expanding rooms into empty space ────────
+
+function fillGaps(rooms, buildable) {
+  const W = buildable.width, H = buildable.length;
+
+  for (const room of rooms) {
+    // Extend right edge toward nearest wall/room that shares vertical overlap
+    const rightEdge = r2(room.x + room.width);
+    const nearestRight = rooms
+      .filter(r => r !== room
+        && r.x >= rightEdge - 0.1
+        && Math.max(r.y, room.y) < Math.min(r.y + r.height, room.y + room.height) - 0.5)
+      .reduce((m, r) => Math.min(m, r.x), W);
+    if (nearestRight - rightEdge > 1) room.width = r2(nearestRight - room.x);
+
+    // Extend bottom edge toward nearest wall/room that shares horizontal overlap
+    const bottomEdge = r2(room.y + room.height);
+    const nearestDown = rooms
+      .filter(r => r !== room
+        && r.y >= bottomEdge - 0.1
+        && Math.max(r.x, room.x) < Math.min(r.x + r.width, room.x + room.width) - 0.5)
+      .reduce((m, r) => Math.min(m, r.y), H);
+    if (nearestDown - bottomEdge > 1) room.height = r2(nearestDown - room.y);
+  }
+
   return rooms;
 }
 

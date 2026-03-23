@@ -251,6 +251,52 @@ export default function SVGFloorPlan({ layout, width, height }) {
             ▼  ROAD  ({facing} FACING)  ▼
           </text>
 
+          {/* ── Parking (drawn BEFORE rooms so rooms appear on top) ──────── */}
+          {layout.parking && (() => {
+            const p   = layout.parking;
+            const ppx2 = px(p.x), ppy2 = py(p.y);
+            const pw2 = p.width * scale, ph2 = Math.max(20, p.height * scale);
+            const cars = p.cars || 1;
+            const bayW = pw2 / cars;
+            return (
+              <g style={{ cursor: 'pointer' }}
+                onMouseEnter={e => showTip(e, {
+                  name: 'Parking Bay', type: 'Parking',
+                  note: `${cars} car space${cars > 1 ? 's' : ''}, 2.5×5m each.`,
+                })}
+                onMouseLeave={hideTip}>
+                <rect x={ppx2} y={ppy2} width={pw2} height={ph2}
+                  fill="#d8d0c0" stroke="#888" strokeWidth="0.8" rx="2"/>
+                {Array.from({ length: cars }).map((_, ci) => {
+                  const bx2 = ppx2 + ci * bayW;
+                  const cw  = bayW - 4, ch = ph2 - 4;
+                  const cx2 = bx2 + 2, cy2 = ppy2 + 2;
+                  const ww2 = cw * 0.16, wh2 = ch * 0.15;
+                  return (
+                    <g key={ci}>
+                      {ci > 0 && <line x1={bx2} y1={ppy2} x2={bx2} y2={ppy2 + ph2} stroke="#999" strokeWidth="0.7"/>}
+                      <line x1={cx2} y1={cy2} x2={cx2 + cw} y2={cy2 + ch} stroke="#bbb" strokeWidth="0.6"/>
+                      <rect x={cx2 + cw * 0.1} y={cy2 + ch * 0.06}
+                        width={cw * 0.8} height={ch * 0.88}
+                        fill="#f0ece4" stroke="#666" strokeWidth="0.8" rx="2"/>
+                      <line x1={cx2 + cw * 0.18} y1={cy2 + ch * 0.22} x2={cx2 + cw * 0.82} y2={cy2 + ch * 0.22}
+                        stroke="#999" strokeWidth="0.8"/>
+                      <line x1={cx2 + cw * 0.18} y1={cy2 + ch * 0.78} x2={cx2 + cw * 0.82} y2={cy2 + ch * 0.78}
+                        stroke="#999" strokeWidth="0.8"/>
+                      <rect x={cx2 + cw * 0.04}  y={cy2 + ch * 0.1}  width={ww2} height={wh2} fill="#555" rx="1"/>
+                      <rect x={cx2 + cw * 0.04}  y={cy2 + ch * 0.75} width={ww2} height={wh2} fill="#555" rx="1"/>
+                      <rect x={cx2 + cw * 0.80}  y={cy2 + ch * 0.1}  width={ww2} height={wh2} fill="#555" rx="1"/>
+                      <rect x={cx2 + cw * 0.80}  y={cy2 + ch * 0.75} width={ww2} height={wh2} fill="#555" rx="1"/>
+                      <text x={cx2 + cw / 2} y={cy2 + ch * 0.55} textAnchor="middle"
+                        fontSize={Math.max(8, Math.min(13, cw * 0.32))}
+                        fontWeight="bold" fill="#444" fontFamily="sans-serif">P</text>
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          })()}
+
           {/* ── Room fills ────────────────────────────────────────────────── */}
           {rooms.map((room, i) => {
             const s  = rs(room.type);
@@ -356,32 +402,43 @@ export default function SVGFloorPlan({ layout, width, height }) {
                 );
               })}
 
-              {/* Windows — architectural triple-line symbol */}
+              {/* Windows — thin wall-slot symbol (3 parallel lines in wall thickness) */}
               {wins.map((win, i) => {
                 const wx = px(win.x), wy = py(win.y);
-                const ww = Math.max(6, win.width  * scale);
-                const wh = Math.max(6, win.height * scale);
-                const h  = ww >= wh; // horizontal opening?
-                return (
-                  <g key={`w${i}`}>
-                    <rect x={wx} y={wy} width={ww} height={wh} fill="#fff" stroke="none"/>
-                    {h ? (<>
-                      <line x1={wx}    y1={wy}       x2={wx+ww} y2={wy}       stroke="#222" strokeWidth="1.6"/>
-                      <line x1={wx}    y1={wy+wh*.35} x2={wx+ww} y2={wy+wh*.35} stroke="#5588aa" strokeWidth="1"/>
-                      <line x1={wx}    y1={wy+wh*.65} x2={wx+ww} y2={wy+wh*.65} stroke="#5588aa" strokeWidth="1"/>
-                      <line x1={wx}    y1={wy+wh}    x2={wx+ww} y2={wy+wh}    stroke="#222" strokeWidth="1.6"/>
-                      <line x1={wx}    y1={wy}       x2={wx}    y2={wy+wh}    stroke="#222" strokeWidth="1.2"/>
-                      <line x1={wx+ww} y1={wy}       x2={wx+ww} y2={wy+wh}    stroke="#222" strokeWidth="1.2"/>
-                    </>) : (<>
-                      <line x1={wx}       y1={wy} x2={wx}       y2={wy+wh} stroke="#222" strokeWidth="1.6"/>
-                      <line x1={wx+ww*.35} y1={wy} x2={wx+ww*.35} y2={wy+wh} stroke="#5588aa" strokeWidth="1"/>
-                      <line x1={wx+ww*.65} y1={wy} x2={wx+ww*.65} y2={wy+wh} stroke="#5588aa" strokeWidth="1"/>
-                      <line x1={wx+ww}    y1={wy} x2={wx+ww}    y2={wy+wh} stroke="#222" strokeWidth="1.6"/>
-                      <line x1={wx} y1={wy}    x2={wx+ww} y2={wy}    stroke="#222" strokeWidth="1.2"/>
-                      <line x1={wx} y1={wy+wh} x2={wx+ww} y2={wy+wh} stroke="#222" strokeWidth="1.2"/>
-                    </>)}
-                  </g>
-                );
+                const ww = Math.max(8, win.width * scale);
+                // Use wall orientation to decide how to draw the slot
+                const wall = win.wall || (win.orientation === 'vertical' ? 'left' : 'front');
+                const isVert = wall === 'left' || wall === 'right';
+                const T = WO; // slot height = wall thickness
+                if (isVert) {
+                  // Vertical wall — window is a horizontal slot on a vertical wall
+                  const slotH = ww; // window span along the wall
+                  const slotW = T;
+                  const sx = wall === 'right' ? wx - slotW / 2 : wx - slotW / 2;
+                  const sy = wy;
+                  return (
+                    <g key={`w${i}`}>
+                      <rect x={sx} y={sy} width={slotW} height={slotH} fill="#cce8f8" stroke="none"/>
+                      <line x1={sx}           y1={sy} x2={sx}           y2={sy + slotH} stroke="#1a5a8a" strokeWidth="1.4"/>
+                      <line x1={sx + slotW/2} y1={sy} x2={sx + slotW/2} y2={sy + slotH} stroke="#5599cc" strokeWidth="0.8"/>
+                      <line x1={sx + slotW}   y1={sy} x2={sx + slotW}   y2={sy + slotH} stroke="#1a5a8a" strokeWidth="1.4"/>
+                    </g>
+                  );
+                } else {
+                  // Horizontal wall (front/back) — window is a thin horizontal slot
+                  const slotW = ww;
+                  const slotH = T;
+                  const sx = wx;
+                  const sy = wall === 'back' ? wy - slotH / 2 : wy - slotH / 2;
+                  return (
+                    <g key={`w${i}`}>
+                      <rect x={sx} y={sy} width={slotW} height={slotH} fill="#cce8f8" stroke="none"/>
+                      <line x1={sx} y1={sy}           x2={sx + slotW} y2={sy}           stroke="#1a5a8a" strokeWidth="1.4"/>
+                      <line x1={sx} y1={sy + slotH/2} x2={sx + slotW} y2={sy + slotH/2} stroke="#5599cc" strokeWidth="0.8"/>
+                      <line x1={sx} y1={sy + slotH}   x2={sx + slotW} y2={sy + slotH}   stroke="#1a5a8a" strokeWidth="1.4"/>
+                    </g>
+                  );
+                }
               })}
 
               {/* Kitchen platform + double sink */}
@@ -524,57 +581,6 @@ export default function SVGFloorPlan({ layout, width, height }) {
                 </g>
               )}
 
-              {/* Parking — top-down car silhouette */}
-              {layout.parking && (() => {
-                const p   = layout.parking;
-                const ppx2 = px(p.x), ppy2 = py(p.y);
-                const pw2 = p.width * scale, ph2 = Math.max(20, p.height * scale);
-                const cars = p.cars || 1;
-                const bayW = pw2 / cars;
-                return (
-                  <g style={{ cursor: 'pointer' }}
-                    onMouseEnter={e => showTip(e, {
-                      name: 'Parking Bay', type: 'Parking',
-                      note: `${cars} car space${cars > 1 ? 's' : ''}, 2.5×5m each.`,
-                    })}
-                    onMouseLeave={hideTip}>
-                    <rect x={ppx2} y={ppy2} width={pw2} height={ph2}
-                      fill="#d8d0c0" stroke="#888" strokeWidth="0.8" rx="2"/>
-                    {Array.from({ length: cars }).map((_, ci) => {
-                      const bx2 = ppx2 + ci * bayW;
-                      const cw  = bayW - 4, ch = ph2 - 4;
-                      const cx2 = bx2 + 2, cy2 = ppy2 + 2;
-                      const ww2 = cw * 0.16, wh2 = ch * 0.15;
-                      return (
-                        <g key={ci}>
-                          {ci > 0 && <line x1={bx2} y1={ppy2} x2={bx2} y2={ppy2 + ph2} stroke="#999" strokeWidth="0.7"/>}
-                          {/* Diagonal cross */}
-                          <line x1={cx2} y1={cy2} x2={cx2 + cw} y2={cy2 + ch} stroke="#bbb" strokeWidth="0.6"/>
-                          {/* Car body */}
-                          <rect x={cx2 + cw * 0.1} y={cy2 + ch * 0.06}
-                            width={cw * 0.8} height={ch * 0.88}
-                            fill="#f0ece4" stroke="#666" strokeWidth="0.8" rx="2"/>
-                          {/* Windscreen */}
-                          <line x1={cx2 + cw * 0.18} y1={cy2 + ch * 0.22} x2={cx2 + cw * 0.82} y2={cy2 + ch * 0.22}
-                            stroke="#999" strokeWidth="0.8"/>
-                          {/* Rear window */}
-                          <line x1={cx2 + cw * 0.18} y1={cy2 + ch * 0.78} x2={cx2 + cw * 0.82} y2={cy2 + ch * 0.78}
-                            stroke="#999" strokeWidth="0.8"/>
-                          {/* 4 wheels */}
-                          <rect x={cx2 + cw * 0.04}  y={cy2 + ch * 0.1}  width={ww2} height={wh2} fill="#555" rx="1"/>
-                          <rect x={cx2 + cw * 0.04}  y={cy2 + ch * 0.75} width={ww2} height={wh2} fill="#555" rx="1"/>
-                          <rect x={cx2 + cw * 0.80}  y={cy2 + ch * 0.1}  width={ww2} height={wh2} fill="#555" rx="1"/>
-                          <rect x={cx2 + cw * 0.80}  y={cy2 + ch * 0.75} width={ww2} height={wh2} fill="#555" rx="1"/>
-                          {/* P badge */}
-                          <text x={cx2 + cw / 2} y={cy2 + ch * 0.55} textAnchor="middle"
-                            fontSize={Math.max(8, Math.min(13, cw * 0.32))}
-                            fontWeight="bold" fill="#444" fontFamily="sans-serif">P</text>
-                        </g>
-                      );
-                    })}
-                  </g>
-                );
-              })()}
 
             </g>
           )}
