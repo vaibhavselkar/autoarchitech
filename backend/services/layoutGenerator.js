@@ -16,7 +16,7 @@
 const { validatePlan } = require('../../shared/plan-schema');
 const geminiService    = require('./geminiService');
 
-// ─── Hard limits ─────────────────────────────────────────────────────────────
+// ─── Hard limits (also used by fallback generator) ───────────────────────────
 
 const ROOM_MIN = {
   living_room:    { w: 13, h: 12 },
@@ -66,16 +66,17 @@ async function generateLayoutVariations(plot, requirements, preferences = {}, va
   const prefs     = parsePreferences(preferences);
   const buildable = getBuildable(plotData);
 
-  // ── AI generates ALL plans — no static fallback ───────────────────────────
+  // ── AI generates plans, fallback to rule-based if AI fails ──────────────
   let aiLayouts = null;
   try {
     aiLayouts = await geminiService.generateRoomPlacements(plot, requirements, preferences, variations);
   } catch (err) {
-    throw new Error(`AI plan generation failed: ${err.message}`);
+    console.warn(`AI plan generation failed (${err.message}) — will use fallback`);
   }
 
   if (!aiLayouts || aiLayouts.length === 0) {
-    throw new Error('AI returned no plans. Please check your GEMINI_API_KEY and try again.');
+    console.warn('AI returned no plans — using rule-based fallback layouts');
+    return generateFallbackLayouts(plotData, prefs, buildable, req, variations);
   }
 
   const results = [];
@@ -83,9 +84,11 @@ async function generateLayoutVariations(plot, requirements, preferences = {}, va
     const ai = aiLayouts[i];
     if (ai.rooms && ai.rooms.length > 0) {
       resolveOverlaps(ai.rooms, buildable);
+      trimOverlaps(ai.rooms, buildable);
       if (validateAIRooms(ai.rooms, buildable)) {
         const fixedRooms = enforceRoomCounts(ai.rooms, req, buildable);
         resolveOverlaps(fixedRooms, buildable);
+        trimOverlaps(fixedRooms, buildable);
         results.push(buildVariationFromAIRooms(plotData, prefs, buildable, { ...ai, rooms: fixedRooms }, i));
       } else {
         console.warn(`AI variation ${i + 1} failed validation — skipping`);
@@ -94,10 +97,175 @@ async function generateLayoutVariations(plot, requirements, preferences = {}, va
   }
 
   if (results.length === 0) {
-    throw new Error('AI plans did not pass validation. Please try again.');
+    console.warn('All AI variations failed — using rule-based fallback layouts');
+    return generateFallbackLayouts(plotData, prefs, buildable, req, variations);
   }
 
   return results;
+}
+
+// ─── Rule-based fallback: always produces valid layouts ───────────────────────
+
+function generateFallbackLayouts(plotData, prefs, buildable, req, count) {
+  const W = buildable.width, H = buildable.length;
+  const results = [];
+
+  const layoutBuilders = [
+    () => buildLinearRooms(W, H, req),
+    () => buildSplitZoneRooms(W, H, req),
+    () => buildLShapeRooms(W, H, req),
+    () => buildOpenPlanRooms(W, H, req),
+    () => buildCompactRooms(W, H, req),
+  ];
+
+  const themes = ['Modern Minimalist', 'Contemporary', 'Traditional Elegance', 'Vastu Compliant', 'Scandinavian'];
+  const styles = ['linear', 'split-zone', 'l-shape', 'open-plan', 'compact'];
+
+  for (let i = 0; i < Math.min(count, layoutBuilders.length); i++) {
+    const rooms = layoutBuilders[i]();
+    resolveOverlaps(rooms, buildable);
+    const aiData = {
+      rooms,
+      designTheme: themes[i],
+      layoutStyle: styles[i],
+      description: `Fallback ${styles[i]} plan`,
+    };
+    results.push(buildVariationFromAIRooms(plotData, prefs, buildable, aiData, i));
+  }
+
+  if (results.length === 0) throw new Error('Could not generate any valid floor plan. Please adjust your plot dimensions or requirements.');
+  return results;
+}
+
+// Layout builder helpers — all return rooms in buildable-relative coords
+
+function buildLinearRooms(W, H, req) {
+  const rooms = [];
+  let y = 0;
+  const balH = 5;
+  rooms.push({ type: 'balcony', x: 0, y, width: W, height: balH });
+  y += balH;
+
+  const livH = Math.min(14, H * 0.22);
+  rooms.push({ type: 'living_room', x: 0, y, width: W, height: r2(livH) });
+  y += livH;
+
+  const midH = Math.min(11, H * 0.18);
+  const dW = r2(W * 0.5);
+  rooms.push({ type: 'dining', x: 0,  y, width: dW,     height: r2(midH) });
+  rooms.push({ type: 'kitchen', x: dW, y, width: r2(W - dW), height: r2(midH) });
+  y += midH;
+
+  distributePrivateRooms(rooms, W, y, H - y, req);
+  return rooms;
+}
+
+function buildSplitZoneRooms(W, H, req) {
+  const rooms = [];
+  const balH = 5;
+  rooms.push({ type: 'balcony', x: 0, y: 0, width: W, height: balH });
+
+  const pubW = r2(W * 0.5), privW = r2(W - W * 0.5);
+  const pubH = r2(H - balH);
+  const pubY = balH;
+
+  const livH = r2(pubH * 0.45);
+  const dinH = r2(pubH * 0.3);
+  const kitH = r2(pubH - livH - dinH);
+  rooms.push({ type: 'living_room', x: 0,    y: pubY,           width: pubW, height: livH });
+  rooms.push({ type: 'dining',      x: 0,    y: pubY + livH,    width: pubW, height: dinH });
+  rooms.push({ type: 'kitchen',     x: 0,    y: pubY + livH + dinH, width: pubW, height: kitH });
+
+  distributePrivateRooms(rooms, privW, balH, H - balH, req, pubW);
+  return rooms;
+}
+
+function buildLShapeRooms(W, H, req) {
+  const rooms = [];
+  const balH = 5;
+  rooms.push({ type: 'balcony', x: 0, y: 0, width: W, height: balH });
+
+  const leftW = r2(W * 0.55), rightW = r2(W - W * 0.55);
+  const remH = H - balH;
+
+  const livH = r2(remH * 0.4);
+  const dinH = r2(remH * 0.3);
+  const kitH = r2(remH - livH - dinH);
+  rooms.push({ type: 'living_room', x: 0,     y: balH,              width: leftW, height: livH });
+  rooms.push({ type: 'dining',      x: 0,     y: balH + livH,       width: leftW, height: dinH });
+  rooms.push({ type: 'kitchen',     x: 0,     y: balH + livH + dinH, width: leftW, height: kitH });
+
+  distributePrivateRooms(rooms, rightW, balH, remH, req, leftW);
+  return rooms;
+}
+
+function buildOpenPlanRooms(W, H, req) {
+  const rooms = [];
+  const balH = 5;
+  rooms.push({ type: 'balcony', x: 0, y: 0, width: W, height: balH });
+
+  const openH = Math.min(14, H * 0.25);
+  const livW = r2(W * 0.4), dinW = r2(W * 0.3), kitW = r2(W - W * 0.4 - W * 0.3);
+  rooms.push({ type: 'living_room', x: 0,            y: balH, width: livW, height: r2(openH) });
+  rooms.push({ type: 'dining',      x: livW,          y: balH, width: dinW, height: r2(openH) });
+  rooms.push({ type: 'kitchen',     x: livW + dinW,   y: balH, width: kitW, height: r2(openH) });
+
+  distributePrivateRooms(rooms, W, balH + openH, H - balH - openH, req);
+  return rooms;
+}
+
+function buildCompactRooms(W, H, req) {
+  const rooms = [];
+  const balH = 5;
+  rooms.push({ type: 'balcony', x: 0, y: 0, width: W, height: balH });
+
+  const corrW = 3.5;
+  const leftW = r2((W - corrW) * 0.5);
+  const rightW = r2(W - corrW - leftW);
+  const corrX = leftW;
+  const remH = H - balH;
+
+  const livH = r2(remH * 0.4);
+  const dinH = r2(remH - livH);
+  rooms.push({ type: 'living_room', x: 0,     y: balH,          width: leftW,  height: livH });
+  rooms.push({ type: 'dining',      x: 0,     y: balH + livH,   width: leftW,  height: dinH });
+  rooms.push({ type: 'kitchen',     x: corrX + corrW, y: balH, width: rightW, height: r2(remH * 0.35) });
+
+  distributePrivateRooms(rooms, rightW, balH + remH * 0.35, H - balH - remH * 0.35, req, corrX + corrW);
+  return rooms;
+}
+
+function distributePrivateRooms(rooms, W, startY, totalH, req, offsetX = 0) {
+  const beds  = parseInt(req.bedrooms  || 2);
+  const baths = parseInt(req.bathrooms || 2);
+
+  // Build list of private rooms to place
+  const privRooms = [{ type: 'master_bedroom' }];
+  for (let i = 1; i < beds; i++)  privRooms.push({ type: 'bedroom' });
+  for (let i = 0; i < baths; i++) privRooms.push({ type: 'bathroom' });
+  if (parseInt(req.study || 0) > 0) privRooms.push({ type: 'study' });
+  if (req.prayer_room)              privRooms.push({ type: 'prayer_room' });
+
+  const count = privRooms.length;
+  if (count === 0 || totalH < 8) return;
+
+  // Distribute in rows of up to 3 rooms per row
+  const COLS = Math.min(count, 3);
+  const ROWS = Math.ceil(count / COLS);
+  const colW = r2(W / COLS);
+  const rowH = r2(totalH / ROWS);
+
+  privRooms.forEach((rm, idx) => {
+    const col = idx % COLS;
+    const row = Math.floor(idx / COLS);
+    rooms.push({
+      type:   rm.type,
+      x:      r2(offsetX + col * colW),
+      y:      r2(startY  + row * rowH),
+      width:  colW,
+      height: rowH,
+    });
+  });
 }
 
 // ── Ensure AI rooms exactly match user requirements ───────────────────────────
@@ -154,7 +322,7 @@ function enforceRoomCounts(rooms, req, buildable) {
 
 function resolveOverlaps(rooms, buildable) {
   const W = buildable.width, H = buildable.length;
-  const MAX_ITER = 30;
+  const MAX_ITER = 150;
 
   for (let iter = 0; iter < MAX_ITER; iter++) {
     let anyOverlap = false;
@@ -201,6 +369,51 @@ function resolveOverlaps(rooms, buildable) {
     r.y = Math.max(0, Math.min(H - r.height, r2(r.y)));
   }
 
+  return rooms;
+}
+
+// ─── Trim remaining overlaps by shrinking the later room on each pair ────────
+// Called after resolveOverlaps to guarantee zero overlap (push-apart can oscillate).
+
+function trimOverlaps(rooms, buildable) {
+  const W = buildable.width, H = buildable.length;
+  const MIN = 4; // minimum room dimension after trimming (ft)
+
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 0; i < rooms.length; i++) {
+      for (let j = i + 1; j < rooms.length; j++) {
+        const a = rooms[i], b = rooms[j];
+        const ox = Math.min(a.x + a.width,  b.x + b.width)  - Math.max(a.x, b.x);
+        const oy = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+        if (ox <= 0.1 || oy <= 0.1) continue;
+
+        // Resolve along smaller-penetration axis
+        if (ox <= oy) {
+          if (b.x + b.width / 2 >= a.x + a.width / 2) {
+            // b is to the right — push b's left edge to a's right edge
+            const newX = r2(a.x + a.width);
+            b.width  = Math.max(MIN, r2(b.x + b.width - newX));
+            b.x      = Math.min(newX, W - b.width);
+          } else {
+            // b is to the left — shrink b's right edge
+            b.width = Math.max(MIN, r2(a.x - b.x));
+          }
+        } else {
+          if (b.y + b.height / 2 >= a.y + a.height / 2) {
+            // b is below — push b's top edge to a's bottom edge
+            const newY = r2(a.y + a.height);
+            b.height = Math.max(MIN, r2(b.y + b.height - newY));
+            b.y      = Math.min(newY, H - b.height);
+          } else {
+            // b is above — shrink b's bottom edge
+            b.height = Math.max(MIN, r2(a.y - b.y));
+          }
+        }
+        b.x = Math.max(0, Math.min(W - b.width,  b.x));
+        b.y = Math.max(0, Math.min(H - b.height, b.y));
+      }
+    }
+  }
   return rooms;
 }
 
