@@ -69,7 +69,10 @@ ${roomList}
 ═══ LAYOUT TYPES — use exactly one per variation ═══
 ${layoutDescriptions.slice(0, count).map((d, i) => `Variation ${i + 1}: ${d}`).join('\n')}
 
-═══ HARD RULES — every room in every variation must obey ═══
+${prefs.customIdea ? `═══ CLIENT'S SPECIFIC REQUEST — highest priority, honour in every variation ═══
+${prefs.customIdea}
+
+` : ''}═══ HARD RULES — every room in every variation must obey ═══
 1. BOUNDS: 0 ≤ x, (x + width) ≤ ${bW}, 0 ≤ y, (y + height) ≤ ${bL}
 2. NO OVERLAP: rooms must not intersect (touching edges at the same x or y is fine)
 3. FILL: rooms should cover the buildable area with no large gaps

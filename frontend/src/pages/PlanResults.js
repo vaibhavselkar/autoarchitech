@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api from '../services/api';
@@ -9,24 +9,11 @@ import SVGFloorPlan from '../components/SVGFloorPlan';
 export default function PlanResults() {
   const navigate      = useNavigate();
   const location      = useLocation();
-  const containerRef  = useRef(null);
   const [plans,        setPlans]        = useState([]);
   const [loading,      setLoading]      = useState(false);
   const [selectedPlan, setSelectedPlan] = useState(null);
-  const [canvasSize,   setCanvasSize]   = useState({ width: 560, height: 440 });
   const [show3D,       setShow3D]       = useState(false);
   const [showPro,      setShowPro]      = useState(false);
-
-  // Responsive canvas
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const ro = new ResizeObserver(entries => {
-      const w = Math.floor(entries[0].contentRect.width);
-      if (w > 0) setCanvasSize({ width: w, height: Math.floor(w * 0.85) });
-    });
-    ro.observe(containerRef.current);
-    return () => ro.disconnect();
-  }, []);
 
   useEffect(() => {
     if (location.state?.plans) {
@@ -90,35 +77,53 @@ export default function PlanResults() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         {/* ── Plan list ── */}
-        <div className="lg:col-span-1 space-y-2">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Plans</p>
+        <div className="lg:col-span-1" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest" style={{ marginBottom: 4 }}>Plans</p>
           {plans.length === 0
             ? <p className="text-sm text-gray-400">No plans yet. Generate some first.</p>
             : plans.map(plan => {
                 const meta     = plan.layoutJson?.metadata || {};
-                const isAI     = meta.generator === 'ai-enhanced';
+                const isAI     = meta.generator === 'ai-enhanced' || meta.generator === 'ai-placement';
                 const selected = selectedPlan?._id === plan._id;
                 return (
                   <div key={plan._id} onClick={() => setSelectedPlan(plan)}
-                    className={`p-3 rounded-xl border cursor-pointer transition-all select-none ${
-                      selected ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-gray-50'
-                    }`}>
-                    <div className="flex justify-between items-start gap-2">
-                      <div className="min-w-0">
-                        <p className="font-semibold text-gray-900 text-sm truncate">{plan.title}</p>
-                        {meta.theme && <p className="text-xs text-gray-500 mt-0.5 truncate">{meta.theme}</p>}
-                        {meta.description && <p className="text-xs text-gray-400 mt-0.5 truncate italic">{meta.description}</p>}
-                        <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
-                          <span className="text-xs text-gray-500">{plan.layoutJson?.rooms?.length || 0} rooms</span>
+                    style={{
+                      padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
+                      border: selected ? '1.5px solid #3b82f6' : '1px solid #e5e7eb',
+                      background: selected ? '#eff6ff' : '#fff',
+                      boxShadow: selected ? '0 1px 4px rgba(59,130,246,0.15)' : 'none',
+                      transition: 'border-color 0.15s, background 0.15s',
+                      userSelect: 'none',
+                    }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ fontWeight: 600, color: '#111', fontSize: 13, margin: 0,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {plan.title}
+                        </p>
+                        {meta.theme && (
+                          <p style={{ fontSize: 11, color: '#888', margin: '1px 0 0',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {meta.theme}
+                          </p>
+                        )}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5, alignItems: 'center' }}>
+                          <span style={{ fontSize: 10, color: '#777' }}>
+                            {plan.layoutJson?.rooms?.length || 0} rooms
+                          </span>
                           {meta.layoutStyle && (
-                            <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded capitalize">
+                            <span style={{ fontSize: 10, background: '#f3f4f6', color: '#555',
+                              padding: '2px 6px', borderRadius: 4 }}>
                               {meta.layoutStyle.replace('-', ' ')}
                             </span>
                           )}
-                          {isAI && <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-semibold">AI</span>}
+                          {isAI && (
+                            <span style={{ fontSize: 10, background: '#dbeafe', color: '#1d4ed8',
+                              padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>AI</span>
+                          )}
                         </div>
                       </div>
-                      <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0">
+                      <span style={{ fontSize: 10, color: '#aaa', whiteSpace: 'nowrap', flexShrink: 0 }}>
                         {new Date(plan.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                       </span>
                     </div>
@@ -158,9 +163,15 @@ export default function PlanResults() {
                 </div>
               </div>
 
-              {/* SVG Floor Plan canvas */}
-              <div ref={containerRef} style={{ lineHeight: 0 }}>
-                <SVGFloorPlan layout={layout} width={canvasSize.width} height={canvasSize.height} />
+              {/* SVG Floor Plan canvas — fluid, min 70vh */}
+              <div style={{
+                width: '100%', minHeight: '70vh',
+                display: 'flex', alignItems: 'stretch',
+                background: '#f5f2ea', padding: 0, lineHeight: 0,
+              }}>
+                <div style={{ flex: 1 }}>
+                  <SVGFloorPlan layout={layout} />
+                </div>
               </div>
 
               {/* Stats */}
@@ -201,12 +212,8 @@ export default function PlanResults() {
               ✕ Close
             </button>
           </div>
-          <div className="flex-1 min-h-0 overflow-auto">
-            <SVGFloorPlan
-              layout={selectedPlan.layoutJson}
-              width={Math.min(1200, window.innerWidth)}
-              height={window.innerHeight - 56}
-            />
+          <div className="flex-1 min-h-0 overflow-auto" style={{ background: '#f5f2ea' }}>
+            <SVGFloorPlan layout={selectedPlan.layoutJson} />
           </div>
         </div>
       )}

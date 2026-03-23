@@ -43,6 +43,9 @@ const Home = () => {
     garden: false
   });
 
+  const [customIdea, setCustomIdea]     = useState('');
+  const [showSetbacks, setShowSetbacks] = useState(false);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -57,7 +60,7 @@ const Home = () => {
       const payload = {
         plot: plotData,
         requirements,
-        preferences,
+        preferences: { ...preferences, customIdea: customIdea.trim() || undefined },
         variations: 5
       };
 
@@ -90,9 +93,13 @@ const Home = () => {
   };
 
   const updatePreferences = (field, value) => {
-    setPreferences(prev => ({
+    setPreferences(prev => ({ ...prev, [field]: value }));
+  };
+
+  const updateSetback = (side, value) => {
+    setPlotData(prev => ({
       ...prev,
-      [field]: value
+      setback: { ...prev.setback, [side]: parseFloat(value) || 0 }
     }));
   };
 
@@ -147,6 +154,54 @@ const Home = () => {
                   <option value="west">West</option>
                 </select>
               </div>
+            </div>
+
+            {/* Setback toggle */}
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <button
+                type="button"
+                onClick={() => setShowSetbacks(v => !v)}
+                className="flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-800 transition-colors"
+              >
+                <span style={{
+                  display: 'inline-block', width: 16, height: 16, lineHeight: '16px',
+                  textAlign: 'center', borderRadius: '50%',
+                  background: showSetbacks ? '#4f46e5' : '#e0e7ff', color: showSetbacks ? '#fff' : '#4f46e5',
+                  fontSize: 11, fontWeight: 700, flexShrink: 0,
+                }}>{showSetbacks ? '−' : '+'}</span>
+                {showSetbacks ? 'Hide' : 'Customise'} Setbacks
+                <span className="text-xs font-normal text-gray-400">(optional — defaults used if skipped)</span>
+              </button>
+
+              {showSetbacks && (
+                <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { side: 'back',  label: 'Front Setback', hint: 'road side' },
+                    { side: 'front', label: 'Rear Setback',  hint: 'garden side' },
+                    { side: 'left',  label: 'Left Setback',  hint: '' },
+                    { side: 'right', label: 'Right Setback', hint: '' },
+                  ].map(({ side, label, hint }) => (
+                    <div key={side}>
+                      <label className="block text-xs font-medium text-gray-600">
+                        {label}
+                        {hint && <span className="text-gray-400 font-normal ml-1">({hint})</span>}
+                      </label>
+                      <div className="mt-1 flex items-center gap-1">
+                        <input
+                          type="number"
+                          value={plotData.setback[side]}
+                          onChange={e => updateSetback(side, e.target.value)}
+                          className="block w-full border-gray-300 rounded-md shadow-sm text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                          min="0"
+                          max="30"
+                          step="0.5"
+                        />
+                        <span className="text-xs text-gray-400 whitespace-nowrap">ft</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -314,6 +369,43 @@ const Home = () => {
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Your Vision */}
+          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-lg p-6">
+            <div className="flex items-start gap-3 mb-3">
+              <div style={{
+                width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                background: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 18,
+              }}>✨</div>
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Your Vision</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Describe any specific ideas, special requirements or layout preferences. The AI will incorporate them.
+                </p>
+              </div>
+            </div>
+            <textarea
+              value={customIdea}
+              onChange={e => setCustomIdea(e.target.value)}
+              rows={4}
+              maxLength={600}
+              placeholder={
+                'e.g. "I want an open kitchen that connects directly to the living room with a large island. ' +
+                'Master bedroom should have a walk-in wardrobe and attached bathroom. ' +
+                'I prefer a Vastu-friendly layout with the prayer room in the north-east corner."'
+              }
+              className="w-full mt-1 border border-indigo-200 rounded-lg shadow-sm text-sm text-gray-800 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+              style={{ padding: '10px 12px', background: '#fff', lineHeight: 1.6 }}
+            />
+            <div className="flex justify-between items-center mt-1.5">
+              <span className="text-xs text-gray-400 italic">Optional — leave blank to let AI decide freely</span>
+              <span className={`text-xs ${customIdea.length > 550 ? 'text-orange-500' : 'text-gray-400'}`}>
+                {customIdea.length}/600
+              </span>
             </div>
           </div>
 
