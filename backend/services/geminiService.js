@@ -43,12 +43,13 @@ class GeminiService {
     // Build the list of rooms the user needs
     const roomList = this._buildRoomList(req, bW, bL);
 
+    const bW65 = Math.round(bW * 0.65), bW70 = Math.round(bW * 0.7), bW75 = Math.round(bW * 0.75);
     const layoutDescriptions = [
-      'LINEAR: Horizontal bands stacked front-to-back. Balcony full-width at y=0. Living Room full-width next. Dining + Kitchen side-by-side in the middle. Bedrooms + Bathrooms side-by-side at the rear.',
-      'L-SHAPE: Full-width Balcony at front. Left 55% column: Living → Dining → Master Bed+Bath stacked. Right 45% column: Kitchen (tall) → Study → Bedroom+Bath stacked. Each column fills full remaining depth.',
-      'SPLIT-ZONE: Full-width Balcony at front. Left half: Living → Dining → Kitchen stacked full depth. Right half: Master Bed+Bath → Bedroom+Bath stacked full depth. Public and private completely separated.',
-      'COMPACT: Full-width Balcony at front. Central 3.5ft corridor runs full depth. Left of corridor: Living → Study → Master Bed+Bath stacked. Right of corridor: Dining → Kitchen → Bedroom+Bath stacked.',
-      'OPEN-PLAN: Full-width Balcony at front. Below it, Living+Dining+Kitchen merged in one open row side-by-side (same y, same height). All Bedrooms+Bathrooms in one row at the rear.',
+      `LINEAR: Balcony FULL-WIDTH (width=${bW}) at y=0, height=5. Living Room full-width below. Dining + Kitchen side-by-side in the middle. Bedrooms + Bathrooms side-by-side at the rear.`,
+      `L-SHAPE: Balcony RIGHT-ALIGNED (x=${bW-bW65}, width=${bW65}) at y=0, height=5. Left 55% column: Living → Dining → Master Bed+Bath stacked. Right 45% column: Kitchen → Study → Bedroom+Bath stacked.`,
+      `SPLIT-ZONE: Balcony LEFT-ALIGNED (x=0, width=${bW70}) at y=0, height=6. Left half: Living → Dining → Kitchen stacked full depth. Right half: Master Bed+Bath → Bedroom+Bath stacked. Public/private separated.`,
+      `COMPACT: Balcony CENTERED (x=${Math.round((bW-bW75)/2)}, width=${bW75}) at y=0, height=5. Central corridor runs full depth. Left: Living → Study → Master Bed+Bath. Right: Dining → Kitchen → Bedroom+Bath.`,
+      `OPEN-PLAN: Balcony FULL-WIDTH (width=${bW}) at y=0, height=6. Living+Dining+Kitchen in one wide open row side-by-side (same y). All Bedrooms+Bathrooms in a single row at the rear.`,
     ];
 
     const prompt = `You are a senior Indian residential architect. Generate ${count} COMPLETELY DIFFERENT floor plan layouts for the plot below. Each must be a genuine architectural variant — not just resized copies.
@@ -74,14 +75,17 @@ ${prefs.customIdea}
 
 ` : ''}═══ HARD RULES — every room in every variation must obey ═══
 1. BOUNDS: 0 ≤ x, (x + width) ≤ ${bW}, 0 ≤ y, (y + height) ≤ ${bL}
-2. NO OVERLAP: rooms must not intersect (touching edges at the same x or y is fine)
-3. FILL: rooms should cover the buildable area with no large gaps
-4. BALCONY: always at y=0, width ≥ ${Math.round(bW * 0.6)}ft, height = 5 or 6ft
-5. ADJACENCY: kitchen x-adjacent or y-adjacent to dining (they must share a wall)
-6. BATHROOMS: each bathroom must share a wall with a bedroom (same x-range or same y-range, touching)
-7. BEDROOMS: cluster at the rear (large y values)
-8. BATHROOM SIZE: width ≥ 6ft, height ≥ 8ft — never smaller
-${prefs.vastu ? '9. VASTU: Master bedroom at south-west (large x, large y); kitchen at south-east; prayer room at north-east (small x, small y)' : ''}
+2. NO OVERLAP: rooms must not intersect (touching edges is fine)
+3. FILL: cover the buildable area with no large gaps
+4. BALCONY: y=0, height=5 or 6ft — width and x follow your assigned layout type above (varies per variation)
+5. KITCHEN + DINING: must share a wall (x-adjacent or y-adjacent, touching). No gap between them.
+6. BATHROOMS: each bathroom MUST share a wall with exactly ONE bedroom. Bathroom has ONE door only (via that shared wall). Do NOT place bathroom on an exterior wall alone.
+7. LIVING ROOM: must have the LARGEST floor area of all habitable rooms (living > master_bedroom > bedroom > bathroom)
+8. BATHROOM SIZE: width 6–9ft, height 7–10ft — NEVER exceed 9ft wide or 10ft deep
+9. BEDROOM SIZE: every bedroom must be noticeably LARGER than every bathroom. Master bedroom ≥ 12×12ft. Bedroom ≥ 11×10ft.
+10. LAYOUT ORDER (front to back): balcony (y=0) → living_room → dining/kitchen → bedrooms/bathrooms (rear)
+11. BALCONY SHAPE: NOT always full-width. Use the width specified in your layout type description above.
+${prefs.vastu ? '12. VASTU: Master bedroom at south-west (large x, large y); kitchen at south-east; prayer room at north-east (small x, small y)' : ''}
 
 ═══ OUTPUT FORMAT ═══
 Return ONLY a raw JSON array — no markdown, no explanation:
@@ -238,18 +242,36 @@ Recommendations: [bullets]`;
     const styles = ['linear', 'l-shape', 'split-zone', 'compact', 'open-plan'];
     const themes = ['Modern Minimalist', 'Contemporary', 'Traditional Elegance', 'Vastu Compliant', 'Scandinavian'];
 
-    const rooms = Array.isArray(v.rooms) ? v.rooms.map(r => ({
-      type:   String(r.type || 'bedroom'),
-      x:      Math.max(0, parseFloat(r.x) || 0),
-      y:      Math.max(0, parseFloat(r.y) || 0),
-      width:  Math.max(1, parseFloat(r.width)  || 6),
-      height: Math.max(1, parseFloat(r.height) || 8),
-    })).map(r => ({
-      ...r,
-      // Clip to buildable bounds
-      width:  Math.min(r.width,  bW - r.x),
-      height: Math.min(r.height, bL - r.y),
-    })) : [];
+    // Per-type size constraints (must match layoutGenerator.js ROOM_MIN/ROOM_MAX)
+    const RMIN = {
+      living_room:{w:13,h:12}, dining:{w:11,h:10}, kitchen:{w:10,h:10},
+      master_bedroom:{w:13,h:12}, bedroom:{w:11,h:10}, bathroom:{w:6,h:8},
+      study:{w:10,h:10}, balcony:{w:8,h:5}, terrace:{w:8,h:8},
+      prayer_room:{w:8,h:8}, guest_room:{w:11,h:10}, utility_room:{w:6,h:8},
+    };
+    const RMAX = {
+      living_room:{w:22,h:18}, dining:{w:16,h:13}, kitchen:{w:14,h:12},
+      master_bedroom:{w:16,h:15}, bedroom:{w:14,h:13}, bathroom:{w:9,h:10},
+      study:{w:13,h:12}, balcony:{w:bW,h:6}, terrace:{w:20,h:12},
+      prayer_room:{w:12,h:10}, guest_room:{w:14,h:12}, utility_room:{w:10,h:10},
+    };
+
+    const rooms = Array.isArray(v.rooms) ? v.rooms.map(r => {
+      const type = String(r.type || 'bedroom');
+      const mn = RMIN[type] || { w: 6, h: 6 };
+      const mx = RMAX[type] || { w: bW, h: bL };
+      const x  = Math.max(0, parseFloat(r.x) || 0);
+      const y  = Math.max(0, parseFloat(r.y) || 0);
+      const w  = Math.max(mn.w, Math.min(mx.w, parseFloat(r.width)  || mn.w));
+      const h  = Math.max(mn.h, Math.min(mx.h, parseFloat(r.height) || mn.h));
+      return {
+        type,
+        x,
+        y,
+        width:  Math.min(w, bW - x),
+        height: Math.min(h, bL - y),
+      };
+    }) : [];
 
     return {
       layoutStyle: styles.includes(v.layoutStyle) ? v.layoutStyle : styles[index % styles.length],

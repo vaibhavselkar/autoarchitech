@@ -86,11 +86,13 @@ async function generateLayoutVariations(plot, requirements, preferences = {}, va
       resolveOverlaps(ai.rooms, buildable);
       trimOverlaps(ai.rooms, buildable);
       fillGaps(ai.rooms, buildable);
+      enforceRoomHierarchy(ai.rooms);
       if (validateAIRooms(ai.rooms, buildable)) {
         const fixedRooms = enforceRoomCounts(ai.rooms, req, buildable);
         resolveOverlaps(fixedRooms, buildable);
         trimOverlaps(fixedRooms, buildable);
         fillGaps(fixedRooms, buildable);
+        enforceRoomHierarchy(fixedRooms);
         results.push(buildVariationFromAIRooms(plotData, prefs, buildable, { ...ai, rooms: fixedRooms }, i));
       } else {
         console.warn(`AI variation ${i + 1} failed validation — skipping`);
@@ -145,7 +147,7 @@ function buildLinearRooms(W, H, req) {
   const rooms = [];
   let y = 0;
   const balH = 5;
-  rooms.push({ type: 'balcony', x: 0, y, width: W, height: balH });
+  rooms.push({ type: 'balcony', x: 0, y, width: W, height: balH }); // full-width
   y += balH;
 
   const livH = Math.min(14, H * 0.22);
@@ -164,8 +166,8 @@ function buildLinearRooms(W, H, req) {
 
 function buildSplitZoneRooms(W, H, req) {
   const rooms = [];
-  const balH = 5;
-  rooms.push({ type: 'balcony', x: 0, y: 0, width: W, height: balH });
+  const balH = 5, balW = r2(W * 0.7); // left-aligned 70%
+  rooms.push({ type: 'balcony', x: 0, y: 0, width: balW, height: balH });
 
   const pubW = r2(W * 0.5), privW = r2(W - W * 0.5);
   const pubH = r2(H - balH);
@@ -184,8 +186,8 @@ function buildSplitZoneRooms(W, H, req) {
 
 function buildLShapeRooms(W, H, req) {
   const rooms = [];
-  const balH = 5;
-  rooms.push({ type: 'balcony', x: 0, y: 0, width: W, height: balH });
+  const balH = 5, balW = r2(W * 0.65), balX = r2(W * 0.35); // right-aligned 65%
+  rooms.push({ type: 'balcony', x: balX, y: 0, width: balW, height: balH });
 
   const leftW = r2(W * 0.55), rightW = r2(W - W * 0.55);
   const remH = H - balH;
@@ -218,8 +220,8 @@ function buildOpenPlanRooms(W, H, req) {
 
 function buildCompactRooms(W, H, req) {
   const rooms = [];
-  const balH = 5;
-  rooms.push({ type: 'balcony', x: 0, y: 0, width: W, height: balH });
+  const balH = 5, balW = r2(W * 0.75), balX = r2((W - W * 0.75) / 2); // center 75%
+  rooms.push({ type: 'balcony', x: balX, y: 0, width: balW, height: balH });
 
   const corrW = 3.5;
   const leftW = r2((W - corrW) * 0.5);
@@ -379,7 +381,6 @@ function resolveOverlaps(rooms, buildable) {
 
 function trimOverlaps(rooms, buildable) {
   const W = buildable.width, H = buildable.length;
-  const MIN = 4; // minimum room dimension after trimming (ft)
 
   for (let pass = 0; pass < 3; pass++) {
     for (let i = 0; i < rooms.length; i++) {
@@ -389,26 +390,25 @@ function trimOverlaps(rooms, buildable) {
         const oy = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
         if (ox <= 0.1 || oy <= 0.1) continue;
 
-        // Resolve along smaller-penetration axis
+        // Use ROOM_MIN for the trimmed room so it never goes below its minimum size
+        const minBW = ROOM_MIN[b.type]?.w ?? 5;
+        const minBH = ROOM_MIN[b.type]?.h ?? 5;
+
         if (ox <= oy) {
           if (b.x + b.width / 2 >= a.x + a.width / 2) {
-            // b is to the right — push b's left edge to a's right edge
             const newX = r2(a.x + a.width);
-            b.width  = Math.max(MIN, r2(b.x + b.width - newX));
+            b.width  = Math.max(minBW, r2(b.x + b.width - newX));
             b.x      = Math.min(newX, W - b.width);
           } else {
-            // b is to the left — shrink b's right edge
-            b.width = Math.max(MIN, r2(a.x - b.x));
+            b.width = Math.max(minBW, r2(a.x - b.x));
           }
         } else {
           if (b.y + b.height / 2 >= a.y + a.height / 2) {
-            // b is below — push b's top edge to a's bottom edge
             const newY = r2(a.y + a.height);
-            b.height = Math.max(MIN, r2(b.y + b.height - newY));
+            b.height = Math.max(minBH, r2(b.y + b.height - newY));
             b.y      = Math.min(newY, H - b.height);
           } else {
-            // b is above — shrink b's bottom edge
-            b.height = Math.max(MIN, r2(a.y - b.y));
+            b.height = Math.max(minBH, r2(a.y - b.y));
           }
         }
         b.x = Math.max(0, Math.min(W - b.width,  b.x));
@@ -425,24 +425,72 @@ function fillGaps(rooms, buildable) {
   const W = buildable.width, H = buildable.length;
 
   for (const room of rooms) {
+    const maxW = ROOM_MAX[room.type]?.w ?? W;
+    const maxH = ROOM_MAX[room.type]?.h ?? H;
+
     // Extend right edge toward nearest wall/room that shares vertical overlap
     const rightEdge = r2(room.x + room.width);
-    const nearestRight = rooms
-      .filter(r => r !== room
-        && r.x >= rightEdge - 0.1
-        && Math.max(r.y, room.y) < Math.min(r.y + r.height, room.y + room.height) - 0.5)
-      .reduce((m, r) => Math.min(m, r.x), W);
-    if (nearestRight - rightEdge > 1) room.width = r2(nearestRight - room.x);
+    if (room.width < maxW) {
+      const nearestRight = rooms
+        .filter(r => r !== room
+          && r.x >= rightEdge - 0.1
+          && Math.max(r.y, room.y) < Math.min(r.y + r.height, room.y + room.height) - 0.5)
+        .reduce((m, r) => Math.min(m, r.x), W);
+      if (nearestRight - rightEdge > 1) {
+        room.width = r2(Math.min(maxW, nearestRight - room.x));
+      }
+    }
 
     // Extend bottom edge toward nearest wall/room that shares horizontal overlap
     const bottomEdge = r2(room.y + room.height);
-    const nearestDown = rooms
-      .filter(r => r !== room
-        && r.y >= bottomEdge - 0.1
-        && Math.max(r.x, room.x) < Math.min(r.x + r.width, room.x + room.width) - 0.5)
-      .reduce((m, r) => Math.min(m, r.y), H);
-    if (nearestDown - bottomEdge > 1) room.height = r2(nearestDown - room.y);
+    if (room.height < maxH) {
+      const nearestDown = rooms
+        .filter(r => r !== room
+          && r.y >= bottomEdge - 0.1
+          && Math.max(r.x, room.x) < Math.min(r.x + r.width, room.x + room.width) - 0.5)
+        .reduce((m, r) => Math.min(m, r.y), H);
+      if (nearestDown - bottomEdge > 1) {
+        room.height = r2(Math.min(maxH, nearestDown - room.y));
+      }
+    }
   }
+
+  return rooms;
+}
+
+// ─── Enforce architectural room-size hierarchy ────────────────────────────────
+// Rule: living_room = largest habitable room; bathrooms = smallest habitable room
+
+function enforceRoomHierarchy(rooms) {
+  const baths  = rooms.filter(r => r.type === 'bathroom');
+  const beds   = rooms.filter(r => ['master_bedroom','bedroom','guest_room'].includes(r.type));
+  const living = rooms.filter(r => r.type === 'living_room');
+
+  // 1. Every bathroom must be smaller (by area) than every bedroom
+  baths.forEach(bath => {
+    beds.forEach(bed => {
+      if (bath.width * bath.height >= bed.width * bed.height) {
+        const factor = Math.sqrt((bed.width * bed.height * 0.65) / (bath.width * bath.height));
+        bath.width  = r2(Math.max(ROOM_MIN.bathroom.w, Math.min(ROOM_MAX.bathroom.w, bath.width  * factor)));
+        bath.height = r2(Math.max(ROOM_MIN.bathroom.h, Math.min(ROOM_MAX.bathroom.h, bath.height * factor)));
+      }
+    });
+  });
+
+  // 2. Living room must have more area than any other habitable room
+  const habitable = rooms.filter(r => !['balcony','terrace','bathroom','utility_room'].includes(r.type)
+                                    && r.type !== 'living_room');
+  living.forEach(liv => {
+    const livArea = liv.width * liv.height;
+    habitable.forEach(other => {
+      if (other.width * other.height >= livArea) {
+        const factor = Math.sqrt(livArea / (other.width * other.height)) * 0.93;
+        const mn = ROOM_MIN[other.type] || { w: 8, h: 8 };
+        other.width  = r2(Math.max(mn.w, other.width  * factor));
+        other.height = r2(Math.max(mn.h, other.height * factor));
+      }
+    });
+  });
 
   return rooms;
 }
@@ -459,6 +507,12 @@ function validateAIRooms(rooms, buildable) {
     if (r.x < -1 || r.y < -1)         return false;   // out of bounds left/top
     if (r.x + r.width  > W + 1)       return false;   // out of bounds right
     if (r.y + r.height > H + 1)       return false;   // out of bounds bottom
+
+    // Clamp to ROOM_MIN/ROOM_MAX so downstream rendering is never pathological
+    const minW = ROOM_MIN[r.type]?.w ?? 3, minH = ROOM_MIN[r.type]?.h ?? 3;
+    const maxW = ROOM_MAX[r.type]?.w ?? W, maxH = ROOM_MAX[r.type]?.h ?? H;
+    r.width  = Math.max(minW, Math.min(maxW, r.width));
+    r.height = Math.max(minH, Math.min(maxH, r.height));
   }
 
   // Check for significant overlaps (2ft tolerance — allows shared walls + rounding)
@@ -493,7 +547,7 @@ function buildVariationFromAIRooms(plotData, prefs, buildable, aiData, index) {
   const doors      = generateDoors(rooms, plotData, buildable, prefs);
   const windows    = generateWindows(rooms, buildable);
   const walls      = generateWalls(rooms, plotData);
-  const staircase  = placeStaircase(buildable, 'corner');
+  const staircase  = placeStaircase(buildable, prefs.customIdea || '', rooms);
   const parking    = placeParking(plotData, buildable, prefs.parking);
   const setbackZones = buildSetbackZones(plotData);
 
@@ -557,9 +611,10 @@ function parseRequirements(req) {
 
 function parsePreferences(prefs = {}) {
   return {
-    vastu:   prefs.vastu   || false,
-    parking: prefs.parking || { cars: 1, gate_direction: 'left' },
-    style:   prefs.style   || 'modern',
+    vastu:      prefs.vastu      || false,
+    parking:    prefs.parking    || { cars: 1, gate_direction: 'left' },
+    style:      prefs.style      || 'modern',
+    customIdea: prefs.customIdea || '',
   };
 }
 
@@ -597,12 +652,12 @@ function generateDoors(rooms, plotData, buildable, prefs) {
   };
   const findShared = (a, b) => sharedH(a,b)||sharedH(b,a)||sharedV(a,b)||sharedV(b,a);
 
-  // 1. Main entry door on front wall
-  const parkSide = prefs.parking?.gate_direction || 'left';
-  const mainDoorX = parkSide === 'right'   ? buildable.x + buildable.width * 0.25
-                  : parkSide === 'center'  ? buildable.x + buildable.width * 0.5 - 2
-                  :                          buildable.x + buildable.width * 0.65;
-  doors.push({ x: mainDoorX, y: buildable.y, width: 4, height: 7, orientation: 'horizontal', type: 'main', label: 'ENTRY' });
+  // 1. Main entry — wide double door (6ft) on front wall, opposite side from parking
+  const parkSide  = prefs.parking?.gate_direction || 'left';
+  const mainDoorX = parkSide === 'right'  ? buildable.x + buildable.width * 0.25
+                  : parkSide === 'center' ? buildable.x + buildable.width * 0.5 - 3
+                  :                         buildable.x + buildable.width * 0.65;
+  doors.push({ x: mainDoorX, y: buildable.y, width: 6, height: 7, orientation: 'horizontal', type: 'main', label: 'ENTRY' });
 
   // 2. Balcony ↔ Living sliding door
   (byType['balcony']||[]).forEach(bal => (byType['living_room']||[]).forEach(liv => {
@@ -619,27 +674,32 @@ function generateDoors(rooms, plotData, buildable, prefs) {
     }
   }));
 
-  // 4. Dining ↔ Kitchen
+  // 4. Dining ↔ Kitchen (open arch / wide passage)
   (byType['dining']||[]).forEach(din => (byType['kitchen']||[]).forEach(kit => {
     const pt = findShared(din, kit);
     if (pt) {
       const isV = !!(sharedV(din,kit)||sharedV(kit,din));
-      doors.push({ x: pt.x, y: pt.y, width: DOOR_W, height: 7, orientation: isV?'vertical':'horizontal', type: 'room' });
+      doors.push({ x: pt.x, y: pt.y, width: DOOR_W + 1, height: 7, orientation: isV?'vertical':'horizontal', type: 'room' });
     }
   }));
 
-  // 5. Bedroom ↔ Bathroom (en-suite)
+  // 5. Bedroom ↔ Bathroom — ONE door per bathroom, via shared wall only
+  const bathsDone = new Set();
   ['master_bedroom','bedroom','guest_room'].forEach(bt =>
-    (byType['bathroom']||[]).forEach(bath => (byType[bt]||[]).forEach(bed => {
-      const pt = findShared(bed, bath);
-      if (pt) {
-        const isV = !!(sharedV(bed,bath)||sharedV(bath,bed));
-        doors.push({ x: pt.x, y: pt.y, width: 2.5, height: 7, orientation: isV?'vertical':'horizontal', type: 'bathroom' });
-      }
-    }))
+    (byType[bt]||[]).forEach(bed => {
+      (byType['bathroom']||[]).forEach((bath, bi) => {
+        if (bathsDone.has(bi)) return;
+        const pt = findShared(bed, bath);
+        if (pt) {
+          const isV = !!(sharedV(bed,bath)||sharedV(bath,bed));
+          doors.push({ x: pt.x, y: pt.y, width: 2.5, height: 7, orientation: isV?'vertical':'horizontal', type: 'bathroom' });
+          bathsDone.add(bi);
+        }
+      });
+    })
   );
 
-  // 6. Passage door on every private room
+  // 6. Passage door on every private room (NOT bathrooms — they only open into bedrooms)
   ['master_bedroom','bedroom','study','guest_room','prayer_room','utility_room'].forEach(bt =>
     (byType[bt]||[]).forEach(r =>
       doors.push({ x: r.x + r.width * 0.3, y: r.y, width: DOOR_W, height: 7, orientation: 'horizontal', type: 'room' })
@@ -647,6 +707,8 @@ function generateDoors(rooms, plotData, buildable, prefs) {
   );
 
   // 7. Guarantee every room has at least one door
+  //    Bathrooms: door must face their nearest bedroom; other rooms: fallback on top wall
+  const allBeds = rooms.filter(r => ['master_bedroom','bedroom','guest_room'].includes(r.type));
   rooms.forEach(r => {
     const TOL = 1.5;
     const hasDoor = doors.some(d => {
@@ -656,8 +718,28 @@ function generateDoors(rooms, plotData, buildable, prefs) {
       const onRight = Math.abs(d.x - (r.x + r.width)) < TOL  && d.y >= r.y - TOL && d.y < r.y + r.height;
       return onFront || onBack || onLeft || onRight;
     });
-    if (!hasDoor) {
-      doors.push({ x: r.x + r.width * 0.3, y: r.y, width: r.type === 'bathroom' ? 2.5 : DOOR_W, height: 7, orientation: 'horizontal', type: 'room' });
+    if (hasDoor) return;
+
+    if (r.type === 'bathroom') {
+      // Place on wall facing nearest bedroom; skip if no bedrooms in plan
+      if (allBeds.length === 0) return;
+      const rCX = r.x + r.width / 2, rCY = r.y + r.height / 2;
+      const nearest = allBeds.reduce((a, b) => {
+        const da = Math.abs((a.x + a.width / 2) - rCX) + Math.abs((a.y + a.height / 2) - rCY);
+        const db = Math.abs((b.x + b.width / 2) - rCX) + Math.abs((b.y + b.height / 2) - rCY);
+        return da <= db ? a : b;
+      });
+      const dx = (nearest.x + nearest.width / 2) - rCX;
+      const dy = (nearest.y + nearest.height / 2) - rCY;
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        const wx = dx > 0 ? r.x + r.width : r.x;
+        doors.push({ x: wx, y: r.y + r.height * 0.3, width: 2.5, height: 7, orientation: 'vertical', type: 'bathroom' });
+      } else {
+        const wy = dy > 0 ? r.y + r.height : r.y;
+        doors.push({ x: r.x + r.width * 0.3, y: wy, width: 2.5, height: 7, orientation: 'horizontal', type: 'bathroom' });
+      }
+    } else {
+      doors.push({ x: r.x + r.width * 0.3, y: r.y, width: DOOR_W, height: 7, orientation: 'horizontal', type: 'room' });
     }
   });
 
@@ -713,16 +795,57 @@ function generateWalls(rooms, plotData) {
 
 // ─── Staircase, Parking, Setback zones, Dimensions ───────────────────────────
 
-function placeStaircase(buildable) {
-  return { x: buildable.x + buildable.width - 8, y: buildable.y + buildable.length - 10, width: 8, height: 10, type: 'staircase' };
+function placeStaircase(buildable, hint, rooms = []) {
+  const SW = 8, SH = 10;
+  const bx = buildable.x, by = buildable.y;
+  const bw = buildable.width, bh = buildable.length;
+
+  const allCorners = [
+    { x: bx + bw - SW, y: by + bh - SH },  // rear-right  (default first)
+    { x: bx,           y: by + bh - SH },  // rear-left
+    { x: bx + bw - SW, y: by           },  // front-right
+    { x: bx,           y: by           },  // front-left
+  ];
+
+  // If user asked for staircase at front, prefer front corners
+  const corners = /stair.*front|front.*stair/i.test(hint || '')
+    ? [allCorners[2], allCorners[3], allCorners[0], allCorners[1]]
+    : allCorners;
+
+  // Pick corner with least overlap against rooms
+  const overlapArea = (sx, sy) => rooms.reduce((sum, r) => {
+    const ox = Math.min(sx + SW, r.x + r.width)  - Math.max(sx, r.x);
+    const oy = Math.min(sy + SH, r.y + r.height) - Math.max(sy, r.y);
+    return sum + (ox > 0 && oy > 0 ? ox * oy : 0);
+  }, 0);
+
+  const best = corners.reduce((a, b) => overlapArea(a.x, a.y) <= overlapArea(b.x, b.y) ? a : b);
+  return { x: best.x, y: best.y, width: SW, height: SH, type: 'staircase' };
 }
 
 function placeParking(plotData, buildable, parkPrefs = {}) {
-  const cars = parseInt(parkPrefs.cars || 1);
-  const dir  = parkPrefs.gate_direction || 'left';
-  const w    = r2(PARK_W * cars);
-  const x    = dir === 'right' ? plotData.width - w - plotData.setback.right : plotData.setback.left;
-  return { x: r2(x), y: 0, width: w, height: PARK_L, cars, gate_direction: dir };
+  const cars   = parseInt(parkPrefs.cars || 1);
+  const dir    = parkPrefs.gate_direction || 'left';
+  const facing = (plotData.facing || 'north').toLowerCase();
+  const sb     = plotData.setback;
+
+  let x, y, w, h;
+  if (facing === 'north' || facing === 'south') {
+    // Road on top (north) or bottom (south): parking is a horizontal band
+    w = r2(PARK_W * cars);
+    h = PARK_L;
+    x = dir === 'right' ? plotData.width - w - sb.right : sb.left;
+    y = facing === 'north' ? 0 : plotData.length - h;
+  } else {
+    // Road on left (west) or right (east): parking is a vertical strip along that side
+    w = PARK_L;
+    h = r2(PARK_W * cars);
+    y = dir === 'right' ? plotData.length - h - sb.front : sb.back;
+    x = facing === 'east' ? plotData.width - w : 0;
+  }
+
+  return { x: r2(x), y: r2(y), width: w, height: h, cars, gate_direction: dir,
+    gate: { x: r2(x), y: r2(y), width: w, height: h } };
 }
 
 function buildSetbackZones(plotData) {

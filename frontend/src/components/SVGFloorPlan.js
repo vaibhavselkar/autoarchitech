@@ -206,6 +206,13 @@ export default function SVGFloorPlan({ layout }) {
             <marker id={ARR} viewBox="0 0 8 8" refX="4" refY="4" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
               <path d="M0 0L8 4L0 8Z" fill="#444"/>
             </marker>
+            {/* Bug 3 fix — clip path per room so labels can never escape their cell */}
+            {rooms.map((room, i) => (
+              <clipPath key={`cp${i}`} id={`cp-${uid}-${i}`}>
+                <rect x={px(room.x) + 2} y={py(room.y) + 2}
+                  width={room.width * scale - 4} height={room.height * scale - 4}/>
+              </clipPath>
+            ))}
           </defs>
 
           {/* ═══ LAYER 1 — Background ══════════════════════════════════════════ */}
@@ -351,38 +358,62 @@ export default function SVGFloorPlan({ layout }) {
                 );
               })}
 
-              {/* Bathroom fixtures */}
+              {/* Bathroom fixtures — Bug 2: strict size caps + clamped positions */}
               {rooms.filter(r => r.type === 'bathroom').map((room, i) => {
                 const rx = px(room.x), ry = py(room.y);
                 const rw = room.width * scale, rh = room.height * scale;
-                if (rw < 18 || rh < 20) return null;
-                const P = 2, wcW = Math.min(rw * 0.5, 22), wcH = Math.min(rh * 0.35, 26);
-                const bsS = Math.min(rw * 0.42, 16);
+                // Skip tiny rooms that can't fit any symbol
+                if (rw < 40 || rh < 40) return null;
+                const P = 3;
+                // WC: max 28px wide, 38px tall, at most half the room in each axis
+                const wcW = Math.min(28, rw * 0.5);
+                const wcH = Math.min(38, rh * 0.4);
+                // Clamp WC to bottom-left corner, guaranteed inside room
+                const wcX = Math.max(rx + P, Math.min(rx + rw - wcW - P, rx + P));
+                const wcY = Math.max(ry + P, Math.min(ry + rh - wcH - P, ry + rh - wcH - P));
+                // Basin: max 22px, at most 40% of room dimension
+                const bsW = Math.min(22, rw * 0.4);
+                const bsH = Math.min(22, rh * 0.3);
+                // Clamp basin to top-right corner, guaranteed inside room
+                const bsX = Math.max(rx + P, Math.min(rx + rw - bsW - P, rx + rw - bsW - P));
+                const bsY = Math.max(ry + P, Math.min(ry + rh - bsH - P, ry + P));
                 return (
                   <g key={`bf${i}`}>
                     <g style={{ cursor: 'pointer' }}
                       onMouseEnter={e => showTip(e, { name: 'WC', type: 'Sanitary', note: 'Wall-hung WC.' })}
                       onMouseLeave={hideTip}>
-                      <rect x={rx+P} y={ry+rh-P-wcH} width={wcW} height={wcH*0.25}
+                      <rect x={wcX} y={wcY} width={wcW} height={wcH * 0.25}
                         fill="#e8f4f8" stroke="#4a7a9a" strokeWidth="0.7" rx="1"/>
-                      <rect x={rx+P+wcW*0.05} y={ry+rh-P-wcH+wcH*0.25} width={wcW*0.9} height={wcH*0.75}
+                      <rect x={wcX + wcW * 0.05} y={wcY + wcH * 0.25} width={wcW * 0.9} height={wcH * 0.75}
                         fill="#d8ecf4" stroke="#4a7a9a" strokeWidth="0.7" rx="4"/>
                     </g>
                     <g style={{ cursor: 'pointer' }}
                       onMouseEnter={e => showTip(e, { name: 'Washbasin', type: 'Sanitary', note: 'Pedestal basin.' })}
                       onMouseLeave={hideTip}>
-                      <rect x={rx+P} y={ry+P} width={bsS} height={bsS}
+                      <rect x={bsX} y={bsY} width={bsW} height={bsH}
                         fill="#e8f4f8" stroke="#4a7a9a" strokeWidth="0.7" rx="3"/>
-                      <ellipse cx={rx+P+bsS/2} cy={ry+P+bsS/2} rx={bsS*0.3} ry={bsS*0.3}
+                      <ellipse cx={bsX + bsW / 2} cy={bsY + bsH / 2}
+                        rx={bsW * 0.3} ry={bsH * 0.3}
                         fill="#d8ecf4" stroke="#4a7a9a" strokeWidth="0.5"/>
                     </g>
                   </g>
                 );
               })}
 
-              {/* Staircase */}
+              {/* Staircase — skip if it overlaps ANY single room by > 12 sq.ft */}
               {layout.staircase && (() => {
                 const st = layout.staircase;
+                // Bug 1 fix: check max overlap against any single room, not the cumulative total
+                const maxOverlap = (layout.rooms || []).reduce((best, r) => {
+                  const iovX = Math.min(st.x + st.width,  r.x + r.width)  - Math.max(st.x, r.x);
+                  const iovY = Math.min(st.y + st.height, r.y + r.height) - Math.max(st.y, r.y);
+                  const ov   = (iovX > 0 && iovY > 0) ? iovX * iovY : 0;
+                  return Math.max(best, ov);
+                }, 0);
+                if (maxOverlap > 12) {
+                  console.warn('[FloorPlan] Staircase hidden: overlaps a room by', maxOverlap.toFixed(1), 'sq.ft');
+                  return null;
+                }
                 const sx = px(st.x), sy = py(st.y);
                 const sw = st.width * scale, sh = st.height * scale;
                 const steps = 10, tH = sh / steps, bkY = sy + sh * 0.52;
@@ -417,53 +448,105 @@ export default function SVGFloorPlan({ layout }) {
           {/* ═══ LAYER 6 — Doors + Windows ═══════════════════════════════════ */}
           {layers.symbols && (
             <g>
+              {/* Parking sliding gate — rendered before doors so it sits at road edge */}
+              {layout.parking?.gate && (() => {
+                const g   = layout.parking.gate;
+                const gx  = px(g.x), gy = py(0);
+                const gw  = g.width * scale;
+                const gh  = Math.max(6, scale * 0.6);
+                // Two sliding panels — left slides left, right slides right
+                const hw  = gw / 2;
+                return (
+                  <g>
+                    {/* Gate gap on road boundary */}
+                    <rect x={gx} y={gy - 1} width={gw} height={gh + 2} fill="#f5f2ea"/>
+                    {/* Left panel */}
+                    <rect x={gx} y={gy} width={hw - 1} height={gh}
+                      fill="#c8c0b0" stroke="#888" strokeWidth="0.8" rx="1"/>
+                    <line x1={gx + hw * 0.33} y1={gy + 1} x2={gx + hw * 0.33} y2={gy + gh - 1}
+                      stroke="#aaa" strokeWidth="0.6"/>
+                    <line x1={gx + hw * 0.66} y1={gy + 1} x2={gx + hw * 0.66} y2={gy + gh - 1}
+                      stroke="#aaa" strokeWidth="0.6"/>
+                    {/* Right panel */}
+                    <rect x={gx + hw + 1} y={gy} width={hw - 1} height={gh}
+                      fill="#c8c0b0" stroke="#888" strokeWidth="0.8" rx="1"/>
+                    <line x1={gx + hw + 1 + hw * 0.33} y1={gy + 1} x2={gx + hw + 1 + hw * 0.33} y2={gy + gh - 1}
+                      stroke="#aaa" strokeWidth="0.6"/>
+                    <line x1={gx + hw + 1 + hw * 0.66} y1={gy + 1} x2={gx + hw + 1 + hw * 0.66} y2={gy + gh - 1}
+                      stroke="#aaa" strokeWidth="0.6"/>
+                    {/* GATE label */}
+                    <text x={gx + gw / 2} y={gy - 3} textAnchor="middle"
+                      fontSize="6" fill="#888" fontFamily="monospace">GATE</text>
+                  </g>
+                );
+              })()}
+
               {/* Doors */}
               {doors.map((door, i) => {
                 const dx = px(door.x), dy = py(door.y);
                 const dw = Math.max(10, door.width * scale);
                 const isMain = door.type === 'main';
                 const isBath = door.type === 'bathroom';
-                const col = isMain ? '#cc0000' : isBath ? '#226688' : '#555';
-                const sw2 = isMain ? 1.6 : 1;
-                const dir = door.direction || 'right';
-                let leafX2 = dx + dw, leafY2 = dy;
-                let arcD = `M ${dx+dw} ${dy} A ${dw} ${dw} 0 0 0 ${dx} ${dy+dw}`;
-                if (dir === 'left') {
-                  leafX2 = dx - dw;
-                  arcD = `M ${dx-dw} ${dy} A ${dw} ${dw} 0 0 1 ${dx} ${dy+dw}`;
-                } else if (dir === 'up') {
-                  leafY2 = dy - dw;
-                  arcD = `M ${dx} ${dy-dw} A ${dw} ${dw} 0 0 1 ${dx+dw} ${dy}`;
-                } else if (dir === 'down') {
-                  leafY2 = dy + dw;
-                  arcD = `M ${dx} ${dy+dw} A ${dw} ${dw} 0 0 0 ${dx+dw} ${dy}`;
+                const col    = isMain ? '#cc0000' : isBath ? '#226688' : '#555';
+
+                if (isMain) {
+                  // Double-leaf entry: two leaves open outward from centre
+                  const cx = dx + dw / 2, hw = dw / 2;
+                  return (
+                    <g key={`d${i}`}>
+                      <rect x={dx} y={dy - WO / 2} width={dw} height={WO} fill="#f5f2ea"/>
+                      {/* Left leaf */}
+                      <circle cx={cx - hw} cy={dy} r={2.2} fill={col}/>
+                      <line x1={cx - hw} y1={dy} x2={cx} y2={dy} stroke={col} strokeWidth={1.6}/>
+                      <path d={`M ${cx} ${dy} A ${hw} ${hw} 0 0 0 ${cx - hw} ${dy + hw}`}
+                        fill="rgba(204,0,0,0.04)" stroke={col} strokeWidth={0.9} strokeDasharray="3 2"/>
+                      {/* Right leaf */}
+                      <circle cx={cx + hw} cy={dy} r={2.2} fill={col}/>
+                      <line x1={cx + hw} y1={dy} x2={cx} y2={dy} stroke={col} strokeWidth={1.6}/>
+                      <path d={`M ${cx} ${dy} A ${hw} ${hw} 0 0 1 ${cx + hw} ${dy + hw}`}
+                        fill="rgba(204,0,0,0.04)" stroke={col} strokeWidth={0.9} strokeDasharray="3 2"/>
+                      {/* ENTRY label */}
+                      <text x={cx} y={oy - 19} textAnchor="middle" fontSize="7" fontWeight="600"
+                        fill="#cc0000" fontFamily="monospace">↓ ENTRY</text>
+                    </g>
+                  );
                 }
+
+                // Standard single-leaf door — Bug 6: correct arc direction per wall type
+                const isVert = door.orientation === 'vertical';
+                let leafX2, leafY2, arcD, gapX, gapY, gapW, gapH;
+
+                if (isVert) {
+                  // Door is on a left or right wall — leaf hangs down, arc sweeps into room
+                  leafX2 = dx; leafY2 = dy + dw;
+                  gapX = dx - WO / 2; gapY = dy; gapW = WO; gapH = dw;
+                  const sweepRight = dx <= (bx1 + bW / 2);
+                  if (sweepRight) {
+                    // Left wall: swing into room = arc sweeps rightward (CW)
+                    arcD = `M ${dx} ${dy+dw} A ${dw} ${dw} 0 0 1 ${dx+dw} ${dy}`;
+                  } else {
+                    // Right wall: swing into room = arc sweeps leftward (CCW)
+                    arcD = `M ${dx} ${dy+dw} A ${dw} ${dw} 0 0 0 ${dx-dw} ${dy}`;
+                  }
+                } else {
+                  // Horizontal door on top/bottom wall — sweep downward into room (default)
+                  leafX2 = dx + dw; leafY2 = dy;
+                  gapX = dx; gapY = dy - WO / 2; gapW = dw; gapH = WO;
+                  arcD = `M ${dx+dw} ${dy} A ${dw} ${dw} 0 0 0 ${dx} ${dy+dw}`;
+                }
+
                 return (
                   <g key={`d${i}`}>
-                    {/* Wall gap erasure */}
-                    <rect x={dx} y={dy - WO / 2} width={dw} height={WO} fill="#f5f2ea"/>
-                    {/* Hinge dot */}
+                    {/* Erase wall at opening */}
+                    <rect x={gapX} y={gapY} width={gapW} height={gapH} fill="#f5f2ea"/>
                     <circle cx={dx} cy={dy} r={2} fill={col}/>
-                    {/* Door leaf */}
-                    <line x1={dx} y1={dy} x2={leafX2} y2={leafY2}
-                      stroke={col} strokeWidth={sw2}/>
-                    {/* Swing arc */}
-                    <path d={arcD} fill={isMain ? 'rgba(204,0,0,0.05)' : 'none'}
-                      stroke={col} strokeWidth={isMain ? 1 : 0.7}
-                      strokeDasharray="3 2"/>
-                    {/* ENTRY label — placed just above plot top, outside building */}
-                    {isMain && (
-                      <text x={dx + dw / 2} y={oy - 19}
-                        textAnchor="middle" fontSize="7" fontWeight="600"
-                        fill="#cc0000" fontFamily="monospace">
-                        ↓ ENTRY
-                      </text>
-                    )}
+                    <line x1={dx} y1={dy} x2={leafX2} y2={leafY2} stroke={col} strokeWidth={1}/>
+                    <path d={arcD} fill="none" stroke={col} strokeWidth={0.7} strokeDasharray="3 2"/>
                   </g>
                 );
               })}
 
-              {/* Main gate fallback */}
+              {/* Entry fallback if no main door was placed */}
               {doors.filter(d => d.type === 'main').length === 0 && (
                 <g>
                   <rect x={bx1 + bW/2 - 18} y={by2} width={36} height={WO} fill="#f5f2ea"/>
@@ -509,7 +592,7 @@ export default function SVGFloorPlan({ layout }) {
             </g>
           )}
 
-          {/* ═══ LAYER 7 — Room labels (always on top of fills + walls) ══════ */}
+          {/* ═══ LAYER 7 — Room labels — Bug 3: clip to room, adaptive font, first-word for small ══ */}
           {layers.labels && (
             <g style={{ pointerEvents: 'none' }}>
               {rooms.map((room, i) => {
@@ -518,19 +601,24 @@ export default function SVGFloorPlan({ layout }) {
                 if (rw < 20 || rh < 14) return null;
                 const cx = px(room.x) + rw / 2;
                 const cy = py(room.y) + rh / 2;
-                const fz = rw < 50 ? 8 : 10;
+                // Font size scales down for small rooms, never below 7 or above 12
+                const fz  = Math.min(12, Math.max(7, rw / 10));
+                // For very small rooms: show only the first word to avoid overflow
+                const lbl = (rw < 60 || rh < 40) ? s.label.split(' ')[0] : s.label;
+                const showDim = rh > 36 && rw > 55;
                 return (
-                  <g key={`lbl${i}`}>
-                    {/* White backing pill so text is readable over hatched walls */}
-                    <rect x={cx - rw*0.38} y={cy - fz - 3}
-                      width={rw * 0.76} height={rh > 28 ? fz * 2 + 10 : fz + 6}
+                  // clipPath per room (defined in <defs>) prevents any text from escaping the cell
+                  <g key={`lbl${i}`} clipPath={`url(#cp-${uid}-${i})`}>
+                    {/* White backing pill */}
+                    <rect x={cx - rw * 0.38} y={cy - fz - 3}
+                      width={rw * 0.76} height={showDim ? fz * 2 + 10 : fz + 6}
                       fill="rgba(255,255,255,0.72)" rx="3"/>
-                    <text x={cx} y={cy - (rh > 28 ? 3 : 0)}
+                    <text x={cx} y={cy - (showDim ? 3 : 0)}
                       textAnchor="middle" fontSize={fz}
                       fontWeight="600" fontFamily="sans-serif" fill={s.text}>
-                      {s.label}
+                      {lbl}
                     </text>
-                    {rh > 28 && rw > 38 && (
+                    {showDim && (
                       <text x={cx} y={cy + fz + 3}
                         textAnchor="middle" fontSize="7" fill={s.text}
                         opacity="0.75" fontFamily="monospace">
@@ -543,53 +631,73 @@ export default function SVGFloorPlan({ layout }) {
             </g>
           )}
 
-          {/* ═══ LAYER 8 — Dimension lines (strictly outside outer wall) ═════ */}
-          {layers.dims && (
-            <g>
-              {/* Overall width — top, above chain dims */}
-              <line x1={ox} y1={oy - 40} x2={ox + plotPW} y2={oy - 40}
-                stroke="#444" strokeWidth="0.8"
-                markerStart={`url(#${ARR})`} markerEnd={`url(#${AR})`}/>
-              <line x1={ox}          y1={oy - 46} x2={ox}          y2={oy - 34} stroke="#444" strokeWidth="0.5"/>
-              <line x1={ox + plotPW} y1={oy - 46} x2={ox + plotPW} y2={oy - 34} stroke="#444" strokeWidth="0.5"/>
-              <text x={ox + plotPW/2} y={oy - 43} textAnchor="middle"
-                fontSize="8.5" fill="#333" fontFamily="monospace">{fmtDim(plot.width)}</text>
+          {/* ═══ LAYER 8 — Dimension lines — Bug 4: strict offsets from outer wall top ══════════ */}
+          {layers.dims && (() => {
+            // outer wall top in SVG pixels — use this as the reference so dims never enter the building
+            const owTop  = by1 - WO;
+            // Chain dim:   line at owTop-18, text at owTop-22
+            // Overall dim: line at owTop-34, text at owTop-38
+            // These always land in the setback zone, never inside the building footprint
+            const chainY  = owTop - 18;
+            const chainTY = owTop - 22;
+            const overY   = owTop - 34;
+            const overTY  = owTop - 38;
+            return (
+              <g>
+                {/* Overall width — top */}
+                <line x1={ox} y1={overY} x2={ox + plotPW} y2={overY}
+                  stroke="#444" strokeWidth="0.8"
+                  markerStart={`url(#${ARR})`} markerEnd={`url(#${AR})`}/>
+                <line x1={ox}          y1={overY - 4} x2={ox}          y2={overY + 4} stroke="#444" strokeWidth="0.5"/>
+                <line x1={ox + plotPW} y1={overY - 4} x2={ox + plotPW} y2={overY + 4} stroke="#444" strokeWidth="0.5"/>
+                <text x={ox + plotPW / 2} y={overTY} textAnchor="middle"
+                  fontSize="8.5" fill="#333" fontFamily="monospace">{fmtDim(plot.width)}</text>
 
-              {/* Chain dims top: left setback | buildable | right setback */}
-              {[
-                { s: 0,                     e: sb.left,                   lbl: `${fmtFt(sb.left)} SB` },
-                { s: sb.left,               e: plot.width - sb.right,     lbl: fmtDim(plot.width - sb.left - sb.right) },
-                { s: plot.width - sb.right, e: plot.width,                lbl: `${fmtFt(sb.right)} SB` },
-              ].map((d, i) => d.s < d.e && (
-                <g key={`cd${i}`}>
-                  <line x1={px(d.s)} y1={oy - 26} x2={px(d.e)} y2={oy - 26}
-                    stroke="#666" strokeWidth="0.6"
-                    markerStart={`url(#${ARR})`} markerEnd={`url(#${AR})`}/>
-                  <text x={(px(d.s)+px(d.e))/2} y={oy - 29} textAnchor="middle"
-                    fontSize="7" fill="#555" fontFamily="monospace">{d.lbl}</text>
-                </g>
-              ))}
+                {/* Chain dims: left setback | buildable | right setback */}
+                {[
+                  { s: 0,                     e: sb.left,               lbl: `${fmtFt(sb.left)} SB` },
+                  { s: sb.left,               e: plot.width - sb.right, lbl: fmtDim(plot.width - sb.left - sb.right) },
+                  { s: plot.width - sb.right, e: plot.width,            lbl: `${fmtFt(sb.right)} SB` },
+                ].map((d, di) => d.s < d.e && (
+                  <g key={`cd${di}`}>
+                    <line x1={px(d.s)} y1={chainY} x2={px(d.e)} y2={chainY}
+                      stroke="#666" strokeWidth="0.6"
+                      markerStart={`url(#${ARR})`} markerEnd={`url(#${AR})`}/>
+                    <text x={(px(d.s) + px(d.e)) / 2} y={chainTY} textAnchor="middle"
+                      fontSize="7" fill="#555" fontFamily="monospace">{d.lbl}</text>
+                  </g>
+                ))}
 
-              {/* Overall height — right margin */}
-              <line x1={ox + plotPW + 36} y1={oy} x2={ox + plotPW + 36} y2={oy + plotPH}
-                stroke="#444" strokeWidth="0.8"
-                markerStart={`url(#${ARR})`} markerEnd={`url(#${AR})`}/>
-              <line x1={ox+plotPW+30} y1={oy}         x2={ox+plotPW+42} y2={oy}         stroke="#444" strokeWidth="0.5"/>
-              <line x1={ox+plotPW+30} y1={oy+plotPH}  x2={ox+plotPW+42} y2={oy+plotPH}  stroke="#444" strokeWidth="0.5"/>
-              <text x={ox + plotPW + 52} y={oy + plotPH/2} textAnchor="middle"
-                fontSize="8.5" fill="#333" fontFamily="monospace"
-                transform={`rotate(90,${ox+plotPW+52},${oy+plotPH/2})`}>{fmtDim(plot.length)}</text>
-            </g>
-          )}
+                {/* Overall height — right margin */}
+                <line x1={ox + plotPW + 36} y1={oy} x2={ox + plotPW + 36} y2={oy + plotPH}
+                  stroke="#444" strokeWidth="0.8"
+                  markerStart={`url(#${ARR})`} markerEnd={`url(#${AR})`}/>
+                <line x1={ox+plotPW+30} y1={oy}        x2={ox+plotPW+42} y2={oy}        stroke="#444" strokeWidth="0.5"/>
+                <line x1={ox+plotPW+30} y1={oy+plotPH} x2={ox+plotPW+42} y2={oy+plotPH} stroke="#444" strokeWidth="0.5"/>
+                <text x={ox+plotPW+54} y={oy+plotPH/2} textAnchor="middle"
+                  fontSize="8.5" fill="#333" fontFamily="monospace"
+                  transform={`rotate(90,${ox+plotPW+54},${oy+plotPH/2})`}>{fmtDim(plot.length)}</text>
+              </g>
+            );
+          })()}
 
-          {/* ═══ North arrow — top-right corner, outside plan boundary ═══════ */}
-          <g transform={`translate(${ox + plotPW + PAD_R * 0.72},${oy + 26})`}>
-            <circle cx={0} cy={0} r={15} fill="white" stroke="#444" strokeWidth="1"/>
-            <polygon points="0,-12 3,2.5 0,0 -3,2.5" fill="#1a1a1a"/>
-            <polygon points="0,12 3,-2.5 0,0 -3,-2.5" fill="#ccc" stroke="#555" strokeWidth="0.4"/>
-            <text x={0} y={-16} textAnchor="middle"
-              fontSize="8.5" fontWeight="bold" fill="#1a1a1a" fontFamily="sans-serif">N</text>
-          </g>
+          {/* ═══ North arrow — Bug 7: right margin with overflow fallback ════ */}
+          {(() => {
+            const naR  = 15;
+            const naXR = ox + plotPW + PAD_R * 0.6; // nominal right-margin position
+            // If right-margin overflows canvas, move arrow above top-right of plan
+            const naX  = naXR + naR <= VW ? naXR : ox + plotPW - 22;
+            const naY  = naXR + naR <= VW ? oy + 28 : oy - 48;
+            return (
+              <g transform={`translate(${naX},${naY})`}>
+                <circle cx={0} cy={0} r={naR} fill="white" stroke="#444" strokeWidth="1"/>
+                <polygon points="0,-12 3,2.5 0,0 -3,2.5" fill="#1a1a1a"/>
+                <polygon points="0,12 3,-2.5 0,0 -3,-2.5" fill="#ccc" stroke="#555" strokeWidth="0.4"/>
+                <text x={0} y={-17} textAnchor="middle"
+                  fontSize="8.5" fontWeight="bold" fill="#1a1a1a" fontFamily="sans-serif">N</text>
+              </g>
+            );
+          })()}
 
           {/* ═══ Scale bar ════════════════════════════════════════════════════ */}
           <g transform={`translate(${ox + plotPW - 100},${oy + plotPH + 16})`}>
