@@ -13,8 +13,10 @@
  *   "front" = road side = small y,  "back" = garden side = large y.
  */
 
-const { validatePlan } = require('../../shared/plan-schema');
-const geminiService    = require('./geminiService');
+const { validatePlan: schemaValidatePlan } = require('../../shared/plan-schema');
+const { validatePlan }                     = require('./planValidator');
+const { autoFix }                          = require('./planAutoFixer');
+const geminiService                        = require('./geminiService');
 
 // ─── Hard limits (also used by fallback generator) ───────────────────────────
 
@@ -305,7 +307,7 @@ function enforceRoomCounts(rooms, req, buildable) {
   const wantedBeds = parseInt(req.bedrooms || 2);
   const hasMaster  = count('master_bedroom');
   const hasRegular = count('bedroom');
-  const hasTotalBeds = hasMaster + hasRegular;
+  const hasTotalBeds = hasMaster + hasRegular; // eslint-disable-line no-unused-vars
 
   if (hasMaster === 0 && wantedBeds >= 1) addRoom('master_bedroom', 14, 13);
   const wantedRegular = Math.max(0, wantedBeds - 1);
@@ -566,9 +568,22 @@ function buildVariationFromAIRooms(plotData, prefs, buildable, aiData, index) {
     }
   };
 
-  const { isValid, errors } = validatePlan(layout);
-  if (!isValid) console.warn('AI layout validation warnings:', errors);
-  return layout;
+  // Schema check (structural)
+  const schema = schemaValidatePlan(layout);
+  if (!schema.isValid) console.warn('Schema warnings:', schema.errors);
+
+  // Quality validation — run and attach result; auto-fix if possible
+  let finalLayout = layout;
+  const quality = validatePlan(layout);
+  if (!quality.isValid) {
+    const fixed = autoFix(layout, quality.errors);
+    if (fixed) {
+      finalLayout = fixed.plan;
+      finalLayout.metadata.wasFixed = true;
+    }
+  }
+  finalLayout.validation = validatePlan(finalLayout); // attach final quality score
+  return finalLayout;
 }
 const ROOM_LABELS = {
   living_room: 'Living Room', dining: 'Dining', kitchen: 'Kitchen',
@@ -823,7 +838,7 @@ function placeStaircase(buildable, hint, rooms = []) {
   return { x: best.x, y: best.y, width: SW, height: SH, type: 'staircase' };
 }
 
-function placeParking(plotData, buildable, parkPrefs = {}) {
+function placeParking(plotData, _buildable, parkPrefs = {}) {
   const cars   = parseInt(parkPrefs.cars || 1);
   const dir    = parkPrefs.gate_direction || 'left';
   const facing = (plotData.facing || 'north').toLowerCase();

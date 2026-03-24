@@ -305,8 +305,15 @@ export default function PlanResults() {
             ? <p className="text-sm text-gray-400">No plans yet. Generate some first.</p>
             : plans.map(plan => {
                 const meta     = plan.layoutJson?.metadata || {};
+                const val      = plan.layoutJson?.validation || null;
+                const score    = val?.score ?? null;
                 const isAI     = meta.generator === 'ai-enhanced' || meta.generator === 'ai-placement';
                 const selected = selectedPlan?._id === plan._id;
+                // Score dot: green ≥80, yellow 60-79, red <60 / no validation
+                const dotColor = score === null ? '#ccc'
+                               : score >= 80   ? '#22c55e'
+                               : score >= 60   ? '#f59e0b'
+                               :                 '#ef4444';
                 return (
                   <div key={plan._id} onClick={() => setSelectedPlan(plan)}
                     style={{
@@ -318,13 +325,20 @@ export default function PlanResults() {
                       userSelect: 'none',
                     }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <p style={{ fontWeight: 600, color: '#111', fontSize: 13, margin: 0,
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {plan.title}
-                        </p>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        {/* Title row with validation dot */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{
+                            width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                            background: dotColor, boxShadow: `0 0 0 2px ${dotColor}33`,
+                          }} title={score !== null ? `Quality score: ${score}/100` : 'Not validated'} />
+                          <p style={{ fontWeight: 600, color: '#111', fontSize: 13, margin: 0,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {plan.title}
+                          </p>
+                        </div>
                         {meta.theme && (
-                          <p style={{ fontSize: 11, color: '#888', margin: '1px 0 0',
+                          <p style={{ fontSize: 11, color: '#888', margin: '2px 0 0 14px',
                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {meta.theme}
                           </p>
@@ -333,6 +347,15 @@ export default function PlanResults() {
                           <span style={{ fontSize: 10, color: '#777' }}>
                             {plan.layoutJson?.rooms?.length || 0} rooms
                           </span>
+                          {score !== null && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: dotColor }}>
+                              {score}/100
+                            </span>
+                          )}
+                          {meta.wasFixed && (
+                            <span style={{ fontSize: 9, background: '#fef3c7', color: '#92400e',
+                              padding: '1px 5px', borderRadius: 3, fontWeight: 600 }}>Auto-fixed</span>
+                          )}
                           {meta.layoutStyle && (
                             <span style={{ fontSize: 10, background: '#f3f4f6', color: '#555',
                               padding: '2px 6px', borderRadius: 4 }}>
@@ -387,6 +410,55 @@ export default function PlanResults() {
                   })}
                 </div>
               </div>
+
+              {/* ── Validation bar ── */}
+              {(() => {
+                const v = layout.validation;
+                if (!v) return null;
+                const score    = v.score ?? 0;
+                const barColor = score >= 80 ? '#22c55e' : score >= 60 ? '#f59e0b' : '#ef4444';
+                const label    = score >= 80 ? 'Good' : score >= 60 ? 'Fair' : 'Poor';
+                return (
+                  <div style={{
+                    padding: '7px 16px', background: '#f8f8f8', borderBottom: '1px solid #ede8e0',
+                    display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                  }}>
+                    {/* Progress bar */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                      <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>PLAN QUALITY</span>
+                      <div style={{ width: 80, height: 5, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{ width: `${score}%`, height: '100%', background: barColor, borderRadius: 4, transition: 'width 0.4s' }}/>
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: barColor }}>{score}/100 · {label}</span>
+                    </div>
+                    {/* Coverage */}
+                    {v.coverage != null && (
+                      <span style={{ fontSize: 10, color: '#666' }}>Coverage {v.coverage}%</span>
+                    )}
+                    {/* Auto-fixed badge */}
+                    {layout.metadata?.wasFixed && (
+                      <span style={{ fontSize: 10, background: '#fef3c7', color: '#92400e',
+                        padding: '2px 7px', borderRadius: 4, fontWeight: 600 }}>
+                        Auto-corrected
+                      </span>
+                    )}
+                    {/* Errors summary */}
+                    {v.errors?.length > 0 && (
+                      <span style={{ fontSize: 10, color: '#dc2626', marginLeft: 'auto' }}
+                        title={v.errors.map(e => e.message).join('\n')}>
+                        {v.errors.length} issue{v.errors.length > 1 ? 's' : ''} detected — hover to view
+                      </span>
+                    )}
+                    {/* Warnings summary */}
+                    {v.errors?.length === 0 && v.warnings?.length > 0 && (
+                      <span style={{ fontSize: 10, color: '#d97706', marginLeft: 'auto' }}
+                        title={v.warnings.map(w => w.message).join('\n')}>
+                        {v.warnings.length} suggestion{v.warnings.length > 1 ? 's' : ''} — hover to view
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* SVG Floor Plan canvas */}
               <div style={{
