@@ -36,7 +36,7 @@ const ROOM_MIN = {
 };
 
 const ROOM_MAX = {
-  living_room:    { w: 22, h: 18 },
+  living_room:    { w: 35, h: 18 },
   dining:         { w: 16, h: 13 },
   kitchen:        { w: 14, h: 12 },
   master_bedroom: { w: 16, h: 15 },
@@ -578,8 +578,8 @@ function buildVariationFromAIRooms(plotData, prefs, buildable, aiData, index) {
     metadata: {
       version: 4,
       generatedAt: new Date().toISOString(),
-      generator: 'ai-placement',   // Gemini produced the coordinates
-      theme:       aiData.designTheme || `AI Plan ${index + 1}`,
+      generatorType: 'ai',
+      designTheme:   aiData.designTheme || `AI Plan ${index + 1}`,
       description: aiData.description || '',
       layoutStyle: aiData.layoutStyle || 'ai-generated',
       constraints: { minRoomSize: ROOM_MIN, setbacks: plotData.setback }
@@ -655,7 +655,7 @@ function getBuildable(plotData) {
   const sb = plotData.setback;
   return {
     x:      sb.left,
-    y:      sb.back,
+    y:      sb.front,
     width:  r2(plotData.width  - sb.left - sb.right),
     length: r2(plotData.length - sb.back - sb.front),
   };

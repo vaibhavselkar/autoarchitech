@@ -56,9 +56,9 @@ function validatePlan(layout) {
 
   // Buildable region in plot coordinates
   const bx1 = sb.left;
-  const by1 = sb.back;
+  const by1 = sb.front;
   const bx2 = plot.width  - sb.right;
-  const by2 = plot.length - sb.front;
+  const by2 = plot.length - sb.back;
   const bW  = bx2 - bx1;
   const bH  = by2 - by1;
   const buildableArea = bW * bH;
