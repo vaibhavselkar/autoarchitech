@@ -245,33 +245,51 @@ function distributePrivateRooms(rooms, W, startY, totalH, req, offsetX = 0) {
   const beds  = parseInt(req.bedrooms  || 2);
   const baths = parseInt(req.bathrooms || 2);
 
-  // Build list of private rooms to place
-  const privRooms = [{ type: 'master_bedroom' }];
-  for (let i = 1; i < beds; i++)  privRooms.push({ type: 'bedroom' });
-  for (let i = 0; i < baths; i++) privRooms.push({ type: 'bathroom' });
-  if (parseInt(req.study || 0) > 0) privRooms.push({ type: 'study' });
-  if (req.prayer_room)              privRooms.push({ type: 'prayer_room' });
+  if (totalH < 8 || W < 11) return;
 
-  const count = privRooms.length;
-  if (count === 0 || totalH < 8) return;
+  // Each bedroom row: bedroom on left + en-suite bathroom on right (same row, touching wall)
+  // This guarantees bathroom-bedroom adjacency and prevents isolated bathrooms.
+  const BATH_W = Math.min(9, Math.max(7, Math.round(W * 0.28)));
+  const BED_W  = W - BATH_W;
 
-  // Distribute in rows of up to 3 rooms per row
-  const COLS = Math.min(count, 3);
-  const ROWS = Math.ceil(count / COLS);
-  const colW = r2(W / COLS);
-  const rowH = r2(totalH / ROWS);
+  const extras = [];
+  if (parseInt(req.study || 0) > 0) extras.push('study');
+  if (req.prayer_room)              extras.push('prayer_room');
 
-  privRooms.forEach((rm, idx) => {
-    const col = idx % COLS;
-    const row = Math.floor(idx / COLS);
-    rooms.push({
-      type:   rm.type,
-      x:      r2(offsetX + col * colW),
-      y:      r2(startY  + row * rowH),
-      width:  colW,
-      height: rowH,
-    });
-  });
+  const totalRows = beds + extras.length;
+  if (totalRows === 0) return;
+
+  const rowH = r2(totalH / totalRows);
+
+  for (let i = 0; i < beds; i++) {
+    const bedType = i === 0 ? 'master_bedroom' : 'bedroom';
+    const hasBath = i < baths;
+    const y = r2(startY + i * rowH);
+
+    if (hasBath) {
+      // Bedroom on left, its en-suite bathroom on the right — share a vertical wall
+      rooms.push({ type: bedType,   x: r2(offsetX),          y, width: r2(BED_W),  height: rowH });
+      rooms.push({ type: 'bathroom',x: r2(offsetX + BED_W),  y, width: BATH_W,     height: Math.min(rowH, 10) });
+    } else {
+      rooms.push({ type: bedType,   x: r2(offsetX), y, width: W, height: rowH });
+    }
+  }
+
+  // If more bathrooms than bedrooms, split the last bathroom slot into two
+  if (baths > beds && beds > 0) {
+    const lastBath = [...rooms].reverse().find(r => r.type === 'bathroom');
+    if (lastBath) {
+      const halfW = Math.max(6, Math.round(lastBath.width / 2));
+      lastBath.width = halfW;
+      rooms.push({ type: 'bathroom', x: r2(lastBath.x + halfW), y: lastBath.y, width: Math.max(6, BATH_W - halfW), height: lastBath.height });
+    }
+  }
+
+  // Extra rooms (study, prayer_room) fill additional rows after bedrooms
+  for (let i = 0; i < extras.length; i++) {
+    const y = r2(startY + (beds + i) * rowH);
+    rooms.push({ type: extras[i], x: r2(offsetX), y, width: W, height: rowH });
+  }
 }
 
 // ── Ensure AI rooms exactly match user requirements ───────────────────────────

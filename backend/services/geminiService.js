@@ -52,7 +52,20 @@ class GeminiService {
       `OPEN-PLAN: Balcony FULL-WIDTH (width=${bW}) at y=0, height=6. Living+Dining+Kitchen in one wide open row side-by-side (same y). All Bedrooms+Bathrooms in a single row at the rear.`,
     ];
 
-    const prompt = `You are a senior Indian residential architect. Generate ${count} COMPLETELY DIFFERENT floor plan layouts for the plot below. Each must be a genuine architectural variant — not just resized copies.
+    // Compute correct example coordinates for a professional linear plan
+    const _exBalH  = 5;
+    const _exLivH  = Math.min(14, Math.round(bL * 0.27));
+    const _exMidH  = Math.min(12, Math.round(bL * 0.22));
+    const _exRearY = _exBalH + _exLivH + _exMidH;
+    const _exRearH = bL - _exRearY;
+    const _exRow1H = Math.round(_exRearH / 2);
+    const _exRow2H = _exRearH - _exRow1H;
+    const _exBathW = Math.min(9, Math.max(7, Math.round(bW * 0.28)));
+    const _exBedW  = bW - _exBathW;
+    const _exDW    = Math.round(bW * 0.56);
+    const _exKW    = bW - _exDW;
+
+    const prompt = `You are a senior Indian residential civil engineer with 5 years of professional floor plan design experience. Generate ${count} COMPLETELY DIFFERENT floor plan layouts for the plot below. Each must be a genuine architectural variant — not just resized copies.
 
 ═══ COORDINATE SYSTEM ═══
 • Buildable area: ${bW}ft wide × ${bL}ft deep
@@ -67,6 +80,14 @@ Buildable zone: ${bW}ft wide × ${bL}ft deep
 ═══ REQUIRED ROOMS ═══
 ${roomList}
 
+═══ PROFESSIONAL DESIGN PRINCIPLES (3-zone layout) ═══
+Zone 1 — PUBLIC (y=0 to y≈${Math.round(bL*0.35)}): Balcony, Living Room
+Zone 2 — SERVICE (y≈${Math.round(bL*0.35)} to y≈${Math.round(bL*0.58)}): Dining Room + Kitchen (ADJACENT to each other)
+Zone 3 — PRIVATE (y≈${Math.round(bL*0.58)} to y=${bL}): Bedrooms with EN-SUITE Bathrooms
+• Each bathroom must be placed directly beside its bedroom (same y, touching x-wall) so they share a wall.
+• Bathrooms face INTO the bedroom — never isolated on an exterior boundary alone.
+• The layout must feel like a real civil engineer drew it: clear zoning, no wasted corridors, high room coverage.
+
 ═══ LAYOUT TYPES — use exactly one per variation ═══
 ${layoutDescriptions.slice(0, count).map((d, i) => `Variation ${i + 1}: ${d}`).join('\n')}
 
@@ -76,39 +97,48 @@ ${prefs.customIdea}
 ` : ''}═══ HARD RULES — every room in every variation must obey ═══
 1. BOUNDS: 0 ≤ x, (x + width) ≤ ${bW}, 0 ≤ y, (y + height) ≤ ${bL}
 2. NO OVERLAP: rooms must not intersect (touching edges is fine)
-3. FILL: cover the buildable area with no large gaps
-4. BALCONY: y=0, height=5 or 6ft — width and x follow your assigned layout type above (varies per variation)
-5. KITCHEN + DINING: must share a wall (x-adjacent or y-adjacent, touching). No gap between them.
-6. BATHROOMS: each bathroom MUST share a wall with exactly ONE bedroom. Bathroom has ONE door only (via that shared wall). Do NOT place bathroom on an exterior wall alone.
-7. LIVING ROOM: must have the LARGEST floor area of all habitable rooms (living > master_bedroom > bedroom > bathroom)
-8. BATHROOM SIZE: width 6–9ft, height 7–10ft — NEVER exceed 9ft wide or 10ft deep
-9. BEDROOM SIZE: every bedroom must be noticeably LARGER than every bathroom. Master bedroom ≥ 12×12ft. Bedroom ≥ 11×10ft.
-10. LAYOUT ORDER (front to back): balcony (y=0) → living_room → dining/kitchen → bedrooms/bathrooms (rear)
-11. BALCONY SHAPE: NOT always full-width. Use the width specified in your layout type description above.
-${prefs.vastu ? '12. VASTU: Master bedroom at south-west (large x, large y); kitchen at south-east; prayer room at north-east (small x, small y)' : ''}
+3. COVERAGE ≥ 95%: total room area must be ≥ ${Math.round(bW * bL * 0.95)} sq.ft. Leave NO large empty patches.
+4. BALCONY: y=0, height=5 or 6ft — width and x follow your assigned layout type above
+5. KITCHEN + DINING: must share a wall (touching). Kitchen NEVER on the road-facing front.
+6. EN-SUITE BATHROOMS: every bathroom must share a SIDE WALL with exactly one bedroom (same y-band, touching on x-axis). Example: bedroom at x=0,y=42,w=${_exBedW},h=${_exRow1H} → bathroom at x=${_exBedW},y=42,w=${_exBathW},h=${Math.min(_exRow1H,10)}. NEVER place a bathroom floating alone.
+7. LIVING ROOM: must have the LARGEST floor area of all habitable rooms
+8. BATHROOM SIZE: width 6–9ft, height 8–10ft — NEVER exceed 9ft wide or 10ft deep. NEVER less than 6ft wide or 8ft deep.
+9. BEDROOM SIZE: every bedroom must be LARGER than every bathroom. Master bedroom ≥ 13×12ft. Bedroom ≥ 11×10ft.
+10. LAYOUT ORDER (front to back): balcony (y=0) → living_room → dining/kitchen → bedrooms+bathrooms (rear)
+11. ASPECT RATIO: every room's (width ÷ height) must be between 0.5 and 2.2. No pencil-thin rooms.
+12. BALCONY SHAPE: use the width specified in your layout type description above (not always full-width)
+${prefs.vastu ? '13. VASTU: Master bedroom at south-west (large x, large y); kitchen at south-east; prayer room at north-east (small x, small y)' : ''}
 
 ═══ OUTPUT FORMAT ═══
-Return ONLY a raw JSON array — no markdown, no explanation:
+Return ONLY a raw JSON array — no markdown, no explanation.
+Study this CORRECT PROFESSIONAL EXAMPLE carefully before generating (for a ${bW}×${bL} buildable area):
 [
   {
     "layoutStyle": "linear",
     "designTheme": "Modern Minimalist",
-    "description": "Three-band north-facing plan with open social core",
+    "description": "Three-band plan — open social zone, en-suite private zone",
     "rooms": [
-      { "type": "balcony",       "x": 0,  "y": 0,  "width": ${bW}, "height": 5  },
-      { "type": "living_room",   "x": 0,  "y": 5,  "width": ${bW}, "height": 14 },
-      { "type": "dining",        "x": 0,  "y": 19, "width": ${Math.round(bW*0.5)}, "height": 11 },
-      { "type": "kitchen",       "x": ${Math.round(bW*0.5)}, "y": 19, "width": ${bW - Math.round(bW*0.5)}, "height": 11 },
-      { "type": "master_bedroom","x": 0,  "y": 30, "width": ${Math.round(bW*0.55)}, "height": ${bL - 30} },
-      { "type": "bathroom",      "x": ${Math.round(bW*0.55)}, "y": 30, "width": ${Math.round(bW*0.25)}, "height": ${bL - 30} },
-      { "type": "bedroom",       "x": ${Math.round(bW*0.8)}, "y": 30, "width": ${bW - Math.round(bW*0.8)}, "height": ${bL - 30} }
+      { "type": "balcony",        "x": 0,         "y": 0,          "width": ${bW},      "height": ${_exBalH}  },
+      { "type": "living_room",    "x": 0,         "y": ${_exBalH}, "width": ${bW},      "height": ${_exLivH} },
+      { "type": "dining",         "x": 0,         "y": ${_exBalH+_exLivH}, "width": ${_exDW},  "height": ${_exMidH} },
+      { "type": "kitchen",        "x": ${_exDW},  "y": ${_exBalH+_exLivH}, "width": ${_exKW},  "height": ${_exMidH} },
+      { "type": "master_bedroom", "x": 0,         "y": ${_exRearY}, "width": ${_exBedW}, "height": ${_exRow1H} },
+      { "type": "bathroom",       "x": ${_exBedW},"y": ${_exRearY}, "width": ${_exBathW},"height": ${Math.min(_exRow1H,10)} },
+      { "type": "bedroom",        "x": 0,         "y": ${_exRearY+_exRow1H}, "width": ${_exBedW}, "height": ${_exRow2H} },
+      { "type": "bathroom",       "x": ${_exBedW},"y": ${_exRearY+_exRow1H}, "width": ${_exBathW},"height": ${Math.min(_exRow2H,10)} }
     ]
   }
 ]
 
+KEY OBSERVATIONS from the example:
+• Each bathroom is side-by-side with its bedroom (same y, touching x-wall) — NOT below or floating
+• Rooms fill the ENTIRE buildable area with almost no gaps
+• Zones are clean: public front, service middle, private rear
+• All rooms have good proportions (width:height roughly 1:1 to 2:1)
+
 VALID room type names: balcony, living_room, dining, kitchen, master_bedroom, bedroom, bathroom, study, prayer_room, guest_room, utility_room, terrace
 
-Generate exactly ${count} variation objects now, each with a genuinely different spatial arrangement:`;
+Generate exactly ${count} variation objects now. Each variation must have a GENUINELY DIFFERENT spatial arrangement from the example and from each other:`;
 
     try {
       const result = await this.model.generateContent(prompt);
