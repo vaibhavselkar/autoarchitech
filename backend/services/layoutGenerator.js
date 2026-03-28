@@ -488,7 +488,9 @@ function buildSmartServiceFront(W, H, req) {
  * reliable high scores (smart builders are validator-aware).
  */
 async function generateLayoutVariationsStream(plot, requirements, preferences = {}, count = 3, onPlanReady) {
-  const { getDesignRecommendations } = require('../src/ai/geminiPrompt');
+  const { getDesignRecommendations, callGemini } = require('../src/ai/geminiPrompt');
+  const { resolveLayout, SCALE }                 = require('../src/engine/layoutResolver');
+  const { TYPE_TO_FRONTEND }                     = require('../src/knowledge/physicalRules');
 
   const plotData  = parsePlot(plot);
   const req       = parseRequirements(requirements);
@@ -581,16 +583,77 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
   }
   console.log('  Style scores:', JSON.stringify(styleScores));
 
-  // ── Step 2: Execute each plan using its assigned builder ────────────────────
-  const generator   = process.env.GEMINI_API_KEY ? 'gemini-recommended' : 'rule-based';
-  const assignedStyles = configs.map(c => c.style); // locked-in style per plan
+  // ── Step 2: AI-First — Gemini designs actual rooms, validator scores, smart builder fallback ──
+  //
+  //  Pipeline per plan:
+  //   A. callGemini(style) → band/col/sizeWeight decisions (actual room layout)
+  //   B. resolveLayout()   → pixel coords → convert to feet
+  //   C. buildVariationFromAIRooms() → doors/windows/validator score
+  //   D. If score < 65, smart builder fallback (guaranteed valid rooms)
+  //   E. Overlay Gemini's planName/engineerThinking onto whichever layout won
+
+  const generator      = process.env.GEMINI_API_KEY ? 'gemini-ai-first' : 'rule-based';
+  const assignedStyles = configs.map(c => c.style);
+  const buildableW     = buildable.width;
+  const buildableH     = buildable.length;
 
   const n = Math.min(count, configs.length);
   for (let i = 0; i < n; i++) {
     const cfg   = configs[i];
-    const style = cfg.style; // guaranteed unique across plans
+    const style = cfg.style;
 
-    let rooms = BUILDERS[style]();
+    // ── A: Try Gemini actual room design ────────────────────────────────────
+    let rooms    = null;
+    let aiSource = 'rule-based';
+
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        const geminiPlan = await callGemini({
+          plotWidth:  plotData.width,
+          plotHeight: plotData.length,
+          facing:     plotData.facing || 'North',
+          bedrooms:   req.bedrooms,
+          bathrooms:  req.bathrooms,
+          style:      cfg.theme || style,
+          priorities: ['natural light', 'privacy', 'ventilation'],
+          setbacks: {
+            front: plotData.setback?.front || 3,
+            rear:  plotData.setback?.back  || 3,
+            left:  plotData.setback?.left  || 2,
+            right: plotData.setback?.right || 2,
+          },
+          city: preferences.city || 'Central India',
+        });
+
+        if (geminiPlan?.rooms?.length >= 3) {
+          // ── B: resolveLayout → pixels → feet (buildable-relative) ─────────
+          const pixelRooms = resolveLayout(geminiPlan, buildableW, buildableH);
+          const ftRooms = pixelRooms.map(r => ({
+            type:   TYPE_TO_FRONTEND[r.type] || r.type,
+            x:      r.x / SCALE,
+            y:      r.y / SCALE,
+            width:  r.w / SCALE,
+            height: r.h / SCALE,
+          }));
+          // Add staircase if multi-floor
+          if ((req.floors || 1) > 1) {
+            ftRooms.push(_staircaseRoom(req.staircase_type, req.staircase_position, buildableW, buildableH));
+          }
+          rooms    = ftRooms;
+          aiSource = 'gemini-room-design';
+          console.log(`  Plan ${i + 1} (${style}): Gemini designed ${rooms.length} rooms`);
+        }
+      } catch (err) {
+        console.warn(`  Plan ${i + 1}: Gemini room design failed (${err.message}) — using smart builder`);
+      }
+    }
+
+    // ── D: Smart builder fallback if Gemini failed or returned too few rooms ─
+    if (!rooms || rooms.length < 3) {
+      rooms    = BUILDERS[style]();
+      aiSource = 'smart-builder';
+    }
+
     resolveOverlaps(rooms, buildable);
 
     let layout = buildVariationFromAIRooms(plotData, prefs, buildable, {
@@ -600,13 +663,11 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
       description: cfg.planName || `${req.bedrooms}BHK ${style} plan`,
     }, i);
 
-    // ── Recovery: only if score < 60 AND the replacement style is not already
-    //   assigned to another plan (preserves visual diversity).
-    if ((layout.validation?.score ?? 0) < 60) {
-      // Find best-scoring unused style
+    // ── D2: Recovery — if score < 65, try smart builders (never reuse another plan's style) ──
+    if ((layout.validation?.score ?? 0) < 65) {
       const candidates = ['private-wing', 'linear', 'service-front']
         .filter(s => s !== style && !assignedStyles.slice(0, i).includes(s) && !assignedStyles.slice(i + 1).includes(s));
-      let bestStyle = style, bestScore = layout.validation?.score ?? 0, bestLayout = layout;
+      let bestScore = layout.validation?.score ?? 0;
       for (const candidate of candidates) {
         const fbRooms = BUILDERS[candidate]();
         resolveOverlaps(fbRooms, buildable);
@@ -618,15 +679,15 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
         }, i);
         const fbScore = fbLayout.validation?.score ?? 0;
         if (fbScore > bestScore) {
-          bestScore = fbScore; bestStyle = candidate;
-          bestLayout = fbLayout; rooms = fbRooms;
+          bestScore = fbScore;
+          layout    = fbLayout;
+          aiSource  = `smart-builder-recovery(${candidate})`;
         }
         if (bestScore >= 75) break;
       }
-      layout = bestLayout;
     }
 
-    // Overlay Gemini's design intelligence onto the smart-built layout
+    // ── E: Overlay Gemini's design intelligence ──────────────────────────────
     layout.planName            = cfg.planName;
     layout.engineerThinking    = cfg.engineerThinking;
     layout.vastuCompliant      = cfg.vastuCompliant;
@@ -637,10 +698,11 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
       designTheme: cfg.planName || cfg.theme,
       layoutStyle: style,
       generator,
+      aiSource,
     };
 
     const score = layout.validation?.score ?? 0;
-    console.log(`  Plan ${i + 1} (${style}): "${cfg.planName || cfg.theme}" score=${score}`);
+    console.log(`  Plan ${i + 1} (${style}) [${aiSource}]: "${cfg.planName || cfg.theme}" score=${score}`);
     await onPlanReady(layout, i, 0);
   }
 }
@@ -1103,6 +1165,7 @@ const ROOM_LABELS = {
   master_bedroom: 'Master Bed', bedroom: 'Bedroom', bathroom: 'Bathroom',
   study: 'Study', balcony: 'Balcony', terrace: 'Terrace',
   prayer_room: 'Prayer Room', guest_room: 'Guest Room', utility_room: 'Utility',
+  staircase: 'Staircase', entry: 'Entry / Foyer', corridor: 'Corridor',
 };
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -1183,11 +1246,36 @@ function generateDoors(rooms, plotData, buildable, prefs) {
   };
   const findShared = (a, b) => sharedH(a,b)||sharedH(b,a)||sharedV(a,b)||sharedV(b,a);
 
-  // 1. Main entry — wide double door (6ft) on front wall, opposite side from parking
-  const parkSide  = prefs.parking?.gate_direction || 'left';
-  const mainDoorX = parkSide === 'right'  ? buildable.x + buildable.width * 0.25
-                  : parkSide === 'center' ? buildable.x + buildable.width * 0.5 - 3
-                  :                         buildable.x + buildable.width * 0.65;
+  // 1. Main entry — wide double door (6ft) on front wall.
+  // CRITICAL: Entry MUST open into a living/dining/entry room — NEVER kitchen or bathroom.
+  // Find the best front room (lowest y, highest priority) and center the door on it.
+  const ENTRY_PRIORITY = {
+    entry: 0, living_room: 1, dining: 2, balcony: 3,
+    master_bedroom: 4, bedroom: 4, study: 5, guest_room: 5,
+    utility_room: 6, kitchen: 99, bathroom: 100,
+  };
+  const frontThreshold = buildable.y + Math.min(buildable.length * 0.35, 15);
+  const frontRooms = rooms
+    .filter(r => r.y <= frontThreshold)
+    .sort((a, b) => {
+      const pa = ENTRY_PRIORITY[a.type] ?? 50;
+      const pb = ENTRY_PRIORITY[b.type] ?? 50;
+      if (pa !== pb) return pa - pb;
+      return a.y - b.y; // prefer rooms closer to road
+    });
+  let mainDoorX;
+  if (frontRooms.length > 0) {
+    const entryRoom = frontRooms[0]; // best room (non-kitchen priority)
+    mainDoorX = r2(entryRoom.x + entryRoom.width / 2 - 3);
+  } else {
+    // Fallback: parking-side geometry
+    const parkSide = prefs.parking?.gate_direction || 'left';
+    mainDoorX = parkSide === 'right'  ? buildable.x + buildable.width * 0.25
+              : parkSide === 'center' ? buildable.x + buildable.width * 0.5 - 3
+              :                         buildable.x + buildable.width * 0.65;
+  }
+  // Clamp within buildable width
+  mainDoorX = Math.max(buildable.x, Math.min(buildable.x + buildable.width - 6, mainDoorX));
   doors.push({ x: mainDoorX, y: buildable.y, width: 6, height: 7, orientation: 'horizontal', type: 'main', label: 'ENTRY' });
 
   // 2. Balcony ↔ Living sliding door
