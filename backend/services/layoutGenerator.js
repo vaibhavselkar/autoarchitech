@@ -385,56 +385,104 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
   const buildable = getBuildable(plotData);
   const W = buildable.width, H = buildable.length;
 
-  // Build a personalized description based on actual requirements
-  const bedLabel = `${req.bedrooms}-bedroom`;
-  const isWide   = W / H > 0.75;
-
+  // Style configs: one per plan slot
   const SMART_CONFIGS = [
     {
       style: 'linear',
       theme: 'Modern Minimalist',
-      desc:  `${bedLabel} linear layout — full-width living with dining and kitchen side-by-side in the service zone`,
+      desc:  `${req.bedrooms}-bedroom linear layout — full-width living with dining and kitchen side-by-side`,
       build: () => buildSmartLinear(W, H, req),
     },
     {
       style: 'private-wing',
       theme: 'Contemporary',
-      desc:  `${bedLabel} private-wing plan — all bedrooms in a dedicated left wing, living/dining/kitchen stacked on the right`,
+      desc:  `${req.bedrooms}-bedroom private-wing — all bedrooms in a dedicated left wing`,
       build: () => buildSmartPrivateWing(W, H, req),
     },
     {
       style: 'service-front',
-      theme: isWide ? 'Scandinavian' : 'Traditional Elegance',
-      desc:  `${bedLabel} service-front design — kitchen and dining at the front, spacious living room opening to the garden`,
-      build: () => buildSmartServiceFront(W, H, req),
-    },
-    {
-      style: 'compact',
-      theme: 'Vastu Compliant',
-      desc:  'Compact Vastu-aligned layout with corridor separation between public and private zones',
-      build: () => buildCompactRooms(W, H, req),
-    },
-    {
-      style: 'l-shape',
       theme: 'Traditional Elegance',
-      desc:  'L-shaped arrangement — offset balcony at front maximises natural light to all rooms',
-      build: () => buildLShapeRooms(W, H, req),
+      desc:  `${req.bedrooms}-bedroom service-front — kitchen and dining at the front, living opens to garden`,
+      build: () => buildSmartServiceFront(W, H, req),
     },
   ];
 
+  // Gemini params for when AI is available
+  const { generatePlan } = require('../src/engine');
+  const userParams = {
+    plotWidth:  plotData.width,
+    plotHeight: plotData.length,
+    facing:     plotData.facing || 'North',
+    bedrooms:   req.bedrooms,
+    bathrooms:  req.bathrooms,
+    city:       preferences.city || 'Central India',
+    setbacks: {
+      front: plotData.setback?.front || 3,
+      rear:  plotData.setback?.back  || 3,
+      left:  plotData.setback?.left  || 2,
+      right: plotData.setback?.right || 2,
+    },
+  };
+
+  // Check if Gemini is available (API key set)
+  const geminiAvailable = !!process.env.GEMINI_API_KEY;
+
   const n = Math.min(count, SMART_CONFIGS.length);
   for (let i = 0; i < n; i++) {
-    const cfg   = SMART_CONFIGS[i];
+    const cfg = SMART_CONFIGS[i];
+    let layout;
+
+    // ── Path A: Gemini available → use full AI engine pipeline ──────────────
+    if (geminiAvailable) {
+      try {
+        const priorities = [
+          ['natural light', 'ventilation', 'space'],
+          ['privacy', 'natural light', 'vastu'],
+          ['functionality', 'privacy', 'ventilation'],
+        ][i];
+        const engineResult = await generatePlan({ ...userParams, priorities }, cfg.style);
+
+        const ISCALE = 10;
+        const sb = plotData.setback || { front: 3, back: 3, left: 2, right: 2 };
+        const normalizedRooms = engineResult.rooms.map(r => ({
+          ...r,
+          width:  r.widthFt  || r.w / ISCALE,
+          height: r.heightFt || r.h / ISCALE,
+          x: (r.x / ISCALE) + (sb.left  || 2),
+          y: (r.y / ISCALE) + (sb.front || 3),
+        }));
+        layout = {
+          rooms: normalizedRooms,
+          plot: { width: plotData.width, length: plotData.length, facing: plotData.facing, setback: sb },
+          svg:  engineResult.svg,
+          metadata: { ...engineResult.metadata, designTheme: engineResult.planName, layoutStyle: engineResult.layoutType, generator: 'gemini-engine-v2' },
+          planName:            engineResult.planName,
+          layoutType:          engineResult.layoutType,
+          engineerThinking:    engineResult.engineerThinking,
+          vastuCompliant:      engineResult.vastuCompliant,
+          sunlightStrategy:    engineResult.sunlightStrategy,
+          ventilationStrategy: engineResult.ventilationStrategy,
+        };
+        const validation = validatePlan(layout);
+        layout.validation = validation;
+        console.log(`  Plan ${i + 1} (AI ${cfg.style}): score=${validation?.score ?? 0}`);
+        await onPlanReady(layout, i, 0);
+        continue;
+      } catch (err) {
+        console.warn(`  Plan ${i + 1} AI failed (${err.message}) — using smart builder`);
+      }
+    }
+
+    // ── Path B: Gemini unavailable → use proven smart builders (score 95-100) ──
     const rooms = cfg.build();
     resolveOverlaps(rooms, buildable);
-    const aiData = {
+    layout = buildVariationFromAIRooms(plotData, prefs, buildable, {
       rooms,
       designTheme: cfg.theme,
       layoutStyle: cfg.style,
       description: cfg.desc,
-    };
-    const layout = buildVariationFromAIRooms(plotData, prefs, buildable, aiData, i);
-    const score  = layout.validation?.score ?? 0;
+    }, i);
+    const score = layout.validation?.score ?? 0;
     console.log(`  Plan ${i + 1} (${cfg.style}): score=${score}`);
     await onPlanReady(layout, i, 0);
   }
