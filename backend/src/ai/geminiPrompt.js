@@ -149,4 +149,102 @@ async function callGemini(params) {
   }
 }
 
-module.exports = { callGemini, buildPrompt, SYSTEM_PROMPT };
+/**
+ * getDesignRecommendations(params)
+ *
+ * Asks Gemini to DECIDE which 3 layout strategies work best for this
+ * specific plot and requirements. The physical room placement is then
+ * handled by the proven smart builders — Gemini provides the DESIGN BRAIN.
+ *
+ * Returns: { plans: [{ style, planName, theme, engineerThinking,
+ *                       vastuCompliant, sunlightStrategy, ventilationStrategy }, ...] }
+ */
+async function getDesignRecommendations(params) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
+
+  const {
+    plotWidth, plotHeight, facing,
+    bedrooms = 3, bathrooms = 2,
+    city = 'Central India',
+    setbacks = { front: 3, rear: 3, left: 2, right: 2 },
+  } = params;
+
+  const buildableW = plotWidth  - (setbacks.left  || 2) - (setbacks.right || 2);
+  const buildableH = plotHeight - (setbacks.front || 3) - (setbacks.rear  || 3);
+
+  const prompt = `
+You are a licensed civil engineer. A client needs ${bedrooms} bedrooms and ${bathrooms} bathrooms
+on a ${plotWidth}ft × ${plotHeight}ft plot (buildable area: ${buildableW}ft × ${buildableH}ft)
+facing ${facing} in ${city}.
+
+Your job: recommend 3 GENUINELY DIFFERENT floor plan strategies for this specific plot.
+Each must use a distinct spatial organization. Available strategies:
+  "linear"       — horizontal zone bands: front/middle/rear
+  "private-wing" — bedrooms in a private left column, public rooms on right
+  "service-front"— kitchen/dining at front near road, living opens to rear garden
+
+For each plan, you decide:
+1. Which strategy fits best for ONE of the 3 plans (each plan must use a different strategy)
+2. A creative, unique plan name (be specific, not generic — e.g. "Sunlit Vastu 2BHK" not "Plan A")
+3. The design theme (e.g. "Modern Minimalist", "Traditional Vastu", "Compact Contemporary")
+4. 2-3 sentences of engineer thinking explaining WHY this strategy suits this plot/orientation
+5. Whether it can be Vastu compliant
+6. Sunlight and ventilation strategies specific to this plot's orientation
+
+Consider the plot's ${facing} facing carefully — where does morning/evening sun come in?
+For a ${buildableH}ft deep × ${buildableW}ft wide buildable area, which layout avoids wasted space?
+
+Return ONLY this JSON (no markdown, no explanation):
+{
+  "plans": [
+    {
+      "style": "linear",
+      "planName": "unique descriptive name",
+      "theme": "design theme",
+      "engineerThinking": "2-3 sentences: why this strategy, orientation logic, key trade-offs",
+      "vastuCompliant": true,
+      "sunlightStrategy": "specific to ${facing} facing and plot dimensions",
+      "ventilationStrategy": "cross-ventilation approach for ${buildableW}×${buildableH}ft buildable"
+    },
+    {
+      "style": "private-wing",
+      "planName": "...",
+      "theme": "...",
+      "engineerThinking": "...",
+      "vastuCompliant": false,
+      "sunlightStrategy": "...",
+      "ventilationStrategy": "..."
+    },
+    {
+      "style": "service-front",
+      "planName": "...",
+      "theme": "...",
+      "engineerThinking": "...",
+      "vastuCompliant": false,
+      "sunlightStrategy": "...",
+      "ventilationStrategy": "..."
+    }
+  ]
+}
+`.trim();
+
+  const genAI    = new GoogleGenerativeAI(apiKey);
+  const model    = genAI.getGenerativeModel({
+    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    systemInstruction: SYSTEM_PROMPT,
+    generationConfig: { temperature: 0.7, responseMimeType: 'application/json' },
+  });
+
+  const result = await model.generateContent(prompt);
+  const text   = result.response.text();
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    const clean = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
+  }
+}
+
+module.exports = { callGemini, buildPrompt, SYSTEM_PROMPT, getDesignRecommendations };

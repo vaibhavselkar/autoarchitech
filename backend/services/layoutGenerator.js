@@ -433,113 +433,135 @@ function buildSmartServiceFront(W, H, req) {
 // Encodes all validator rules directly — no AI calls, no retries, scores >90.
 // onPlanReady(layout, index, attempts) is called for each completed plan.
 
+/**
+ * generateLayoutVariationsStream
+ *
+ * Architecture:
+ *   GEMINI = the BRAIN  → decides which 3 layouts work best, names them,
+ *                          explains the engineering rationale (one API call)
+ *   SMART BUILDERS = the HANDS → execute the layout with guaranteed valid scores
+ *
+ * This gives genuine AI intelligence (unique plans per requirements) +
+ * reliable high scores (smart builders are validator-aware).
+ */
 async function generateLayoutVariationsStream(plot, requirements, preferences = {}, count = 3, onPlanReady) {
+  const { getDesignRecommendations } = require('../src/ai/geminiPrompt');
+
   const plotData  = parsePlot(plot);
   const req       = parseRequirements(requirements);
   const prefs     = parsePreferences(preferences);
   const buildable = getBuildable(plotData);
   const W = buildable.width, H = buildable.length;
 
-  // Style configs: one per plan slot
-  const SMART_CONFIGS = [
-    {
-      style: 'linear',
-      theme: 'Modern Minimalist',
-      desc:  `${req.bedrooms}-bedroom linear layout — full-width living with dining and kitchen side-by-side`,
-      build: () => buildSmartLinear(W, H, req),
-    },
-    {
-      style: 'private-wing',
-      theme: 'Contemporary',
-      desc:  `${req.bedrooms}-bedroom private-wing — all bedrooms in a dedicated left wing`,
-      build: () => buildSmartPrivateWing(W, H, req),
-    },
-    {
-      style: 'service-front',
-      theme: 'Traditional Elegance',
-      desc:  `${req.bedrooms}-bedroom service-front — kitchen and dining at the front, living opens to garden`,
-      build: () => buildSmartServiceFront(W, H, req),
-    },
-  ];
-
-  // Gemini params for when AI is available
-  const { generatePlan } = require('../src/engine');
-  const userParams = {
-    plotWidth:  plotData.width,
-    plotHeight: plotData.length,
-    facing:     plotData.facing || 'North',
-    bedrooms:   req.bedrooms,
-    bathrooms:  req.bathrooms,
-    city:       preferences.city || 'Central India',
-    setbacks: {
-      front: plotData.setback?.front || 3,
-      rear:  plotData.setback?.back  || 3,
-      left:  plotData.setback?.left  || 2,
-      right: plotData.setback?.right || 2,
-    },
+  // Builder map — indexed by style string
+  const BUILDERS = {
+    'linear':        () => buildSmartLinear(W, H, req),
+    'private-wing':  () => buildSmartPrivateWing(W, H, req),
+    'service-front': () => buildSmartServiceFront(W, H, req),
   };
 
-  // Check if Gemini is available (API key set)
-  const geminiAvailable = !!process.env.GEMINI_API_KEY;
+  // Default configs (used when Gemini is unavailable)
+  const DEFAULT_CONFIGS = [
+    { style: 'linear',        theme: 'Modern Minimalist',    planName: `${req.bedrooms}BHK Linear Home`,        engineerThinking: 'Full-width horizontal zoning — balcony at front, living in middle, bedrooms at rear. Maximises cross-ventilation across the full plot width.',       vastuCompliant: false, sunlightStrategy: 'East-facing kitchen gets morning light.', ventilationStrategy: 'Full-width rooms allow cross-ventilation.' },
+    { style: 'private-wing',  theme: 'Contemporary Indian',  planName: `${req.bedrooms}BHK Private Wing`,       engineerThinking: 'Bedrooms clustered in a private left column away from road noise. Living and kitchen stack on the right for easy service access.',                   vastuCompliant: false, sunlightStrategy: 'South-west bedrooms avoid morning road noise.', ventilationStrategy: 'Column separation creates natural airflow corridors.' },
+    { style: 'service-front', theme: 'Traditional Elegance', planName: `${req.bedrooms}BHK Garden Living`,      engineerThinking: 'Kitchen and dining near the road for service convenience. Living room opens to the rear garden — the family zone is calm and private.',            vastuCompliant: false, sunlightStrategy: 'Living room faces garden for afternoon light.', ventilationStrategy: 'Kitchen vents to road side; living to garden.' },
+  ];
 
-  const n = Math.min(count, SMART_CONFIGS.length);
-  for (let i = 0; i < n; i++) {
-    const cfg = SMART_CONFIGS[i];
-    let layout;
-
-    // ── Path A: Gemini available → use full AI engine pipeline ──────────────
-    if (geminiAvailable) {
-      try {
-        const priorities = [
-          ['natural light', 'ventilation', 'space'],
-          ['privacy', 'natural light', 'vastu'],
-          ['functionality', 'privacy', 'ventilation'],
-        ][i];
-        const engineResult = await generatePlan({ ...userParams, priorities }, cfg.style);
-
-        const ISCALE = 10;
-        const sb = plotData.setback || { front: 3, back: 3, left: 2, right: 2 };
-        const normalizedRooms = engineResult.rooms.map(r => ({
-          ...r,
-          width:  r.widthFt  || r.w / ISCALE,
-          height: r.heightFt || r.h / ISCALE,
-          x: (r.x / ISCALE) + (sb.left  || 2),
-          y: (r.y / ISCALE) + (sb.front || 3),
+  // ── Step 1: Get Gemini's design recommendations (one call, all 3 plans) ────
+  let configs = DEFAULT_CONFIGS;
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const userParams = {
+        plotWidth:  plotData.width,
+        plotHeight: plotData.length,
+        facing:     plotData.facing || 'North',
+        bedrooms:   req.bedrooms,
+        bathrooms:  req.bathrooms,
+        city:       preferences.city || 'Central India',
+        setbacks: {
+          front: plotData.setback?.front || 3,
+          rear:  plotData.setback?.back  || 3,
+          left:  plotData.setback?.left  || 2,
+          right: plotData.setback?.right || 2,
+        },
+      };
+      const recs = await getDesignRecommendations(userParams);
+      if (recs?.plans?.length >= 3) {
+        configs = recs.plans.map(p => ({
+          style:              p.style || 'linear',
+          theme:              p.theme || 'Modern Minimalist',
+          planName:           p.planName,
+          engineerThinking:   p.engineerThinking,
+          vastuCompliant:     p.vastuCompliant ?? false,
+          sunlightStrategy:   p.sunlightStrategy,
+          ventilationStrategy:p.ventilationStrategy,
         }));
-        layout = {
-          rooms: normalizedRooms,
-          plot: { width: plotData.width, length: plotData.length, facing: plotData.facing, setback: sb },
-          svg:  engineResult.svg,
-          metadata: { ...engineResult.metadata, designTheme: engineResult.planName, layoutStyle: engineResult.layoutType, generator: 'gemini-engine-v2' },
-          planName:            engineResult.planName,
-          layoutType:          engineResult.layoutType,
-          engineerThinking:    engineResult.engineerThinking,
-          vastuCompliant:      engineResult.vastuCompliant,
-          sunlightStrategy:    engineResult.sunlightStrategy,
-          ventilationStrategy: engineResult.ventilationStrategy,
-        };
-        const validation = validatePlan(layout);
-        layout.validation = validation;
-        console.log(`  Plan ${i + 1} (AI ${cfg.style}): score=${validation?.score ?? 0}`);
-        await onPlanReady(layout, i, 0);
-        continue;
-      } catch (err) {
-        console.warn(`  Plan ${i + 1} AI failed (${err.message}) — using smart builder`);
+        console.log('  Gemini provided recommendations:', configs.map(c => c.style).join(', '));
+      }
+    } catch (err) {
+      console.warn('  Gemini design recommendations failed:', err.message, '— using defaults');
+    }
+  }
+
+  // ── Step 2: Execute each plan using the smart builder for that style ────────
+  const generator = process.env.GEMINI_API_KEY ? 'gemini-recommended' : 'rule-based';
+  const usedStyles = new Set(); // track used styles for variety on fallback
+
+  const n = Math.min(count, configs.length);
+  for (let i = 0; i < n; i++) {
+    const cfg = configs[i];
+    let style    = cfg.style in BUILDERS ? cfg.style : 'linear';
+    let builderFn = BUILDERS[style];
+
+    let rooms = builderFn();
+    resolveOverlaps(rooms, buildable);
+
+    let layout = buildVariationFromAIRooms(plotData, prefs, buildable, {
+      rooms,
+      designTheme: cfg.theme || style,
+      layoutStyle: style,
+      description: cfg.planName || `${req.bedrooms}BHK ${style} plan`,
+    }, i);
+
+    // ── Smart recovery: if score < 70, try remaining styles to find a better fit ──
+    // This handles plots that are too compact for horizontal band layouts.
+    if ((layout.validation?.score ?? 0) < 70) {
+      const fallbackOrder = ['private-wing', 'linear', 'service-front'].filter(s => s !== style);
+      for (const fallback of fallbackOrder) {
+        const fbRooms = BUILDERS[fallback]();
+        resolveOverlaps(fbRooms, buildable);
+        const fbLayout = buildVariationFromAIRooms(plotData, prefs, buildable, {
+          rooms: fbRooms,
+          designTheme: cfg.theme || fallback,
+          layoutStyle: fallback,
+          description: cfg.planName || `${req.bedrooms}BHK ${fallback}`,
+        }, i);
+        if ((fbLayout.validation?.score ?? 0) > (layout.validation?.score ?? 0)) {
+          layout = fbLayout;
+          style  = fallback;
+          rooms  = fbRooms;
+        }
+        if ((layout.validation?.score ?? 0) >= 80) break;
       }
     }
 
-    // ── Path B: Gemini unavailable → use proven smart builders (score 95-100) ──
-    const rooms = cfg.build();
-    resolveOverlaps(rooms, buildable);
-    layout = buildVariationFromAIRooms(plotData, prefs, buildable, {
-      rooms,
-      designTheme: cfg.theme,
-      layoutStyle: cfg.style,
-      description: cfg.desc,
-    }, i);
+    // Overlay Gemini's design intelligence onto the smart-built layout
+    layout.planName            = cfg.planName;
+    layout.engineerThinking    = cfg.engineerThinking;
+    layout.vastuCompliant      = cfg.vastuCompliant;
+    layout.sunlightStrategy    = cfg.sunlightStrategy;
+    layout.ventilationStrategy = cfg.ventilationStrategy;
+    layout.metadata = {
+      ...layout.metadata,
+      designTheme: cfg.planName || cfg.theme,
+      layoutStyle: style,
+      generator,
+    };
+
     const score = layout.validation?.score ?? 0;
-    console.log(`  Plan ${i + 1} (${cfg.style}): score=${score}`);
+    console.log(`  Plan ${i + 1} (${style}): "${cfg.planName || cfg.theme}" score=${score}`);
     await onPlanReady(layout, i, 0);
+    usedStyles.add(style);
   }
 }
 
