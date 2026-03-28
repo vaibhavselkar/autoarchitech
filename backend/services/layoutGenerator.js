@@ -166,28 +166,81 @@ const VM = { liv: 10, bed: 10, serv: 10, kit: 7, bath: 7, balc: 5 };
  * Dining on LEFT, kitchen on RIGHT. Bath attached to right of each bedroom row.
  * Balcony skipped on tight plots so all rooms stay above validator minimums.
  */
+/**
+ * Distribute `total` height across zones with given ideal shares.
+ * Guarantees: each zone ≥ its minimum, total always = `total`.
+ * If minimums alone exceed `total`, scales proportionally.
+ */
+/**
+ * Distribute `total` height across zones.
+ * zones = [{ min, shares }, ...]
+ * Guarantees: all heights ≥ 1, sum = total.
+ * On generous plots: each zone ≥ its min + surplus proportional to shares.
+ * On tight plots: scale min proportionally (rooms may be below validator min).
+ */
+function _zoneHeights(total, zones) {
+  const sumMin   = zones.reduce((s, z) => s + z.min, 0);
+  const sumShare = zones.reduce((s, z) => s + z.shares, 0);
+  const result   = [];
+
+  if (sumMin >= total) {
+    // Tight: scale each min proportionally
+    const scale = total / sumMin;
+    let used = 0;
+    for (let i = 0; i < zones.length; i++) {
+      if (i === zones.length - 1) {
+        result.push(Math.max(1, total - used));
+      } else {
+        const h = Math.max(1, Math.floor(zones[i].min * scale));
+        result.push(h);
+        used += h;
+      }
+    }
+  } else {
+    // Normal: minimums guaranteed + distribute surplus by shares
+    const surplus = total - sumMin;
+    let used = 0;
+    for (let i = 0; i < zones.length; i++) {
+      if (i === zones.length - 1) {
+        result.push(Math.max(1, total - used));
+      } else {
+        const h = zones[i].min + Math.round((zones[i].shares / sumShare) * surplus);
+        result.push(h);
+        used += h;
+      }
+    }
+  }
+
+  return result;
+}
+
 function buildSmartLinear(W, H, req) {
   const beds  = clp(parseInt(req.bedrooms  || 2), 1, 6);
   const baths = clp(parseInt(req.bathrooms || 2), 0, beds);
 
-  const bathW = clp(Math.round(W * 0.28), 6, 9);
-  const bedW  = W - bathW;
-  const regBeds = Math.max(0, beds - 1);
-  const regRows = Math.ceil(regBeds / 2);
+  const bathW       = clp(Math.round(W * 0.28), 6, 9);
+  const bedW        = W - bathW;
+  const regBeds     = Math.max(0, beds - 1);
+  const regRows     = Math.ceil(regBeds / 2);
+  const totalBedRows = 1 + regRows;
 
-  const minPrivH = VM.bed * (regRows + 1);
-  const includeBalc = (H - VM.balc) >= (minPrivH + VM.liv + VM.serv);
+  const minTotalH = VM.balc + VM.liv + VM.serv + totalBedRows * VM.bed;
+  const includeBalc = H >= minTotalH;
   const balcH = includeBalc ? VM.balc : 0;
+  const remainH = H - balcH;
 
-  const pubH  = H - balcH - minPrivH;
-  const servH = clp(Math.round(pubH * 0.44), VM.serv, 13);
-  const livH  = pubH - servH;
+  // Zone definitions: { min height, proportional share }
+  const [livH, servH, totalBedH] = _zoneHeights(remainH, [
+    { min: VM.liv,                shares: 2 },
+    { min: VM.serv,               shares: 1.5 },
+    { min: VM.bed * totalBedRows, shares: 1.5 * totalBedRows },
+  ]);
+  const eachBedH = Math.max(1, Math.floor(totalBedH / totalBedRows));
 
   const rooms = [];
   let y = 0;
 
   if (includeBalc) {
-    // Full-width balcony — distinctive of this plan
     rooms.push({ type: 'balcony', x: 0, y, width: W, height: balcH });
     y += balcH;
   }
@@ -195,22 +248,20 @@ function buildSmartLinear(W, H, req) {
   rooms.push({ type: 'living_room', x: 0, y, width: W, height: livH });
   y += livH;
 
-  // Service row: Dining LEFT | Kitchen RIGHT
   const dinW = r2(W * 0.48);
   rooms.push({ type: 'dining',  x: 0,    y, width: dinW,     height: servH });
   rooms.push({ type: 'kitchen', x: dinW, y, width: W - dinW, height: servH });
   y += servH;
 
-  // Master bed on LEFT, bath on RIGHT
   if (baths >= 1) {
-    rooms.push({ type: 'master_bedroom', x: 0,    y, width: bedW,  height: VM.bed });
-    rooms.push({ type: 'bathroom',       x: bedW, y, width: bathW, height: VM.bed });
+    rooms.push({ type: 'master_bedroom', x: 0,    y, width: bedW,  height: eachBedH });
+    rooms.push({ type: 'bathroom',       x: bedW, y, width: bathW, height: eachBedH });
   } else {
-    rooms.push({ type: 'master_bedroom', x: 0, y, width: W, height: VM.bed });
+    rooms.push({ type: 'master_bedroom', x: 0, y, width: W, height: eachBedH });
   }
-  y += VM.bed;
+  y += eachBedH;
 
-  _placePrivateRows(rooms, W, y, H, regBeds, VM.bed, bathW, bedW, baths, baths >= 1 ? 1 : 0);
+  _placePrivateRows(rooms, W, y, H, regBeds, eachBedH, bathW, bedW, baths, baths >= 1 ? 1 : 0);
   return rooms;
 }
 
@@ -297,16 +348,20 @@ function buildSmartServiceFront(W, H, req) {
   const regBeds = Math.max(0, beds - 1);
   const regRows = Math.ceil(regBeds / 2);
 
-  const minPrivH = VM.bed * (regRows + 1);
-  const minPubH  = VM.serv + VM.liv;
-  const includeBalc = (H - VM.balc) >= (minPrivH + minPubH);
+  const totalBedRowsSF = 1 + regRows;
+  const minTotalHSF = VM.balc + VM.serv + VM.liv + totalBedRowsSF * VM.bed;
+  const includeBalc = H >= minTotalHSF;
   const balcH = includeBalc ? VM.balc : 0;
+  const remainH = H - balcH;
 
-  const pubH  = H - balcH - minPrivH;
-  const servH = clp(Math.round(pubH * 0.40), VM.serv, 12);
-  const livH  = pubH - servH;
+  const [servH, livH, totalBedHSF] = _zoneHeights(remainH, [
+    { min: VM.serv,                    shares: 1.5 },
+    { min: VM.liv,                     shares: 2   },
+    { min: VM.bed * totalBedRowsSF,    shares: 1.5 * totalBedRowsSF },
+  ]);
+  const eachBedHSF = Math.max(1, Math.floor(totalBedHSF / totalBedRowsSF));
 
-  if (livH < VM.liv) return buildSmartLinear(W, H, req);
+  if (livH < 2) return buildSmartLinear(W, H, req);
 
   const rooms = [];
   let y = 0;
@@ -331,19 +386,19 @@ function buildSmartServiceFront(W, H, req) {
 
   // Bedroom rows: bath on LEFT (opposite of Plan 1)
   if (baths >= 1) {
-    rooms.push({ type: 'bathroom',       x: 0,     y, width: bathW, height: VM.bed });
-    rooms.push({ type: 'master_bedroom', x: bathW, y, width: bedW,  height: VM.bed });
+    rooms.push({ type: 'bathroom',       x: 0,     y, width: bathW, height: eachBedHSF });
+    rooms.push({ type: 'master_bedroom', x: bathW, y, width: bedW,  height: eachBedHSF });
   } else {
-    rooms.push({ type: 'master_bedroom', x: 0, y, width: W, height: VM.bed });
+    rooms.push({ type: 'master_bedroom', x: 0, y, width: W, height: eachBedHSF });
   }
-  y += VM.bed;
+  y += eachBedHSF;
 
   // Regular beds: also bath on LEFT
   const regRows2 = Math.ceil(regBeds / 2);
   let bathIdx = baths >= 1 ? 1 : 0;
   for (let row = 0; row < regRows2; row++) {
     const bedsInRow = Math.min(2, regBeds - row * 2);
-    const rowH      = row === regRows2 - 1 ? (H - y) : VM.bed;
+    const rowH      = row === regRows2 - 1 ? (H - y) : eachBedHSF;
 
     if (bedsInRow === 1) {
       if (bathIdx < baths) {

@@ -13,7 +13,7 @@ const ROOM_SIZES = {
   bedroom:        { minW: 10, minH: 10, maxWFrac: 0.50, maxHFrac: 0.40 },
   bathroom:       { minW:  5, minH:  7, maxWFrac: 0.25, maxHFrac: 0.25 },
   balcony:        { minW:  8, minH:  4, maxWFrac: 0.70, maxHFrac: 0.15 },
-  parking:        { minW:  9, minH: 18, maxWFrac: 0.40, maxHFrac: 0.25 },
+  parking:        { minW:  9, minH: 12, maxWFrac: 0.40, maxHFrac: 0.25 },
   corridor:       { minW:  3, minH:  3, maxWFrac: 0.15, maxHFrac: 0.80 },
   entry:          { minW:  4, minH:  4, maxWFrac: 0.30, maxHFrac: 0.15 },
 };

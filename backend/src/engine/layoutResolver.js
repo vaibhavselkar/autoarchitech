@@ -2,7 +2,7 @@
 /**
  * layoutResolver.js
  * Converts Gemini's band/col/sizeWeight decisions into precise pixel rectangles.
- * Uses splitIntoRows + splitIntoColumns so gaps are mathematically impossible.
+ * Uses splitByWeights so gaps are mathematically impossible.
  */
 
 const { ROOM_SIZES } = require('../knowledge/physicalRules');
@@ -19,7 +19,7 @@ function splitByWeights(total, weights) {
   let cursor = 0;
   for (let i = 0; i < weights.length; i++) {
     const size = (i === weights.length - 1)
-      ? total - cursor                           // last slot takes remainder
+      ? total - cursor                           // last slot takes exact remainder
       : Math.round((weights[i] / sumW) * total);
     slots.push({ offset: cursor, size });
     cursor += size;
@@ -28,47 +28,59 @@ function splitByWeights(total, weights) {
 }
 
 /**
- * Compute the minimum required height (in px) for a given band.
- * This is the maximum of all room minH values in that band.
+ * Return the maximum minH (px) of all rooms in a given band.
+ * Falls back to defaultFrac * BH if the band has no rooms.
  */
-function computeMinBandH(rooms, band) {
-  let minH = 0;
+function bandMinH(rooms, band, BH, defaultFrac) {
+  let maxMin = 0;
   for (const room of rooms) {
     if ((room.band || 2) !== band) continue;
     const rules = ROOM_SIZES[room.type];
-    if (rules) minH = Math.max(minH, rules.minH * SCALE);
+    if (rules) maxMin = Math.max(maxMin, rules.minH * SCALE);
   }
-  return minH;
+  return maxMin || Math.round(defaultFrac * BH);
 }
 
 /**
- * Compute dynamic band heights so every band is at least as tall
- * as its tallest room's minimum, with remaining space distributed
- * proportionally (band 1 = 1 share, band 2 = 2 shares, band 3 = 3 shares).
+ * Compute band heights that:
+ *  1. Respect each band's minimum room requirement
+ *  2. NEVER produce negative or zero heights (safe for any plot size)
+ *  3. Distribute surplus proportionally (band1:band2:band3 = 1:2:3 shares)
  */
 function computeBandHeights(rooms, BH) {
-  const BAND_SHARES = { 1: 1, 2: 2, 3: 3 };
-
-  // Step 1: compute minimum required px height for each band
-  const minH = {
-    1: computeMinBandH(rooms, 1),
-    2: computeMinBandH(rooms, 2),
-    3: computeMinBandH(rooms, 3),
+  // Raw minimums — may sum > BH on small plots
+  const raw = {
+    1: bandMinH(rooms, 1, BH, 0.20),
+    2: bandMinH(rooms, 2, BH, 0.35),
+    3: bandMinH(rooms, 3, BH, 0.40),
   };
 
-  // Step 2: reserve minimum for each band, distribute remainder by shares
-  const totalMin  = minH[1] + minH[2] + minH[3];
-  const remainder = Math.max(0, BH - totalMin);
-  const totalShare = BAND_SHARES[1] + BAND_SHARES[2] + BAND_SHARES[3]; // 6
+  const totalRaw = raw[1] + raw[2] + raw[3];
 
-  const bandH = {
-    1: minH[1] + Math.round((BAND_SHARES[1] / totalShare) * remainder),
-    2: minH[2] + Math.round((BAND_SHARES[2] / totalShare) * remainder),
-    3: 0, // band 3 gets exact remainder
+  // If minimums exceed BH, scale each band proportionally so they sum = BH
+  // This keeps relative proportions intact on any plot size.
+  const scale  = totalRaw > BH ? (BH / totalRaw) : 1;
+  const scaled = {
+    1: Math.max(1, Math.floor(raw[1] * scale)),
+    2: Math.max(1, Math.floor(raw[2] * scale)),
+    3: 0,
   };
-  bandH[3] = BH - bandH[1] - bandH[2];
+  // Band 3 takes exact remainder — always ≥ 1 by construction
+  scaled[3] = Math.max(1, BH - scaled[1] - scaled[2]);
 
-  return bandH;
+  // If we scaled down (small plot), we're done — no surplus to distribute.
+  if (scale < 1) return scaled;
+
+  // Distribute surplus by 1:2:3 share ratio
+  const surplus = BH - scaled[1] - scaled[2] - scaled[3];
+  if (surplus > 0) {
+    const totalShare = 6;
+    scaled[1] += Math.round((1 / totalShare) * surplus);
+    scaled[2] += Math.round((2 / totalShare) * surplus);
+    scaled[3]  = Math.max(1, BH - scaled[1] - scaled[2]);
+  }
+
+  return scaled;
 }
 
 /**
@@ -77,13 +89,14 @@ function computeBandHeights(rooms, BH) {
  * geminiPlan.rooms[] each has: type, band, col, colSpan, sizeWeight
  * buildableW, buildableH are in FEET.
  *
- * Returns rooms[] with added: x, y, w, h, widthFt, heightFt, areaFt (all pixel coords except Ft fields)
+ * Returns rooms[] with added: x, y, w, h, widthFt, heightFt, areaFt
+ * (x/y/w/h are in pixels relative to the buildable area origin)
  */
 function resolveLayout(geminiPlan, buildableW, buildableH) {
-  const BW = buildableW * SCALE;  // total buildable px width
-  const BH = buildableH * SCALE;  // total buildable px height
+  const BW = buildableW * SCALE;
+  const BH = buildableH * SCALE;
 
-  // --- 1. Compute dynamic band heights ---
+  // --- 1. Compute safe band heights ---
   const bandH = computeBandHeights(geminiPlan.rooms, BH);
   const bandY = {
     1: 0,
@@ -98,17 +111,16 @@ function resolveLayout(geminiPlan, buildableW, buildableH) {
     byBand[b].push(room);
   }
 
-  // --- 3. For each band, lay out rooms left-to-right by (col, sizeWeight) ---
+  // --- 3. For each band, lay out rooms left-to-right by col (then sizeWeight) ---
   const resolved = [];
 
   for (const band of [1, 2, 3]) {
     const rooms = byBand[band];
     if (!rooms.length) continue;
 
-    // Sort by col so the left-to-right order is stable
     rooms.sort((a, b) => (a.col || 1) - (b.col || 1));
 
-    const weights = rooms.map(r => r.sizeWeight || 3);
+    const weights = rooms.map(r => Math.max(1, r.sizeWeight || 3));
     const xSlots  = splitByWeights(BW, weights);
 
     const bH = bandH[band];
