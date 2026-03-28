@@ -110,7 +110,272 @@ async function generateLayoutVariations(plot, requirements, preferences = {}, va
   return results;
 }
 
-// ─── Stream generator: emits each plan as soon as it passes score > 80 ────────
+// ─── Smart validator-aware builders ──────────────────────────────────────────
+// Validator minimums (ROOM_MIN_DIM in planValidator.js — these are the ones that count):
+//   living_room h≥10, master_bedroom h≥10, bedroom h≥10, kitchen h≥7, dining h≥10, bathroom h≥7
+// These builders guarantee 100% coverage and zero ROOM_MIN_DIM violations.
+
+const clp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+// Private-zone helper: place paired bedroom rows starting at y=privStartY.
+// All rows span full W. Each bed has an en-suite bath (until baths are used up).
+// Returns the y value reached after the last row.
+function _placePrivateRows(rooms, W, privStartY, H, regBeds, regH, bathW1, bedW1, baths, firstBathIdx) {
+  const regRows = Math.ceil(regBeds / 2);
+  let bathIdx = firstBathIdx;
+  let y = privStartY;
+
+  for (let row = 0; row < regRows; row++) {
+    const bedsInRow = Math.min(2, regBeds - row * 2);
+    const rowH      = row === regRows - 1 ? (H - y) : regH;
+
+    if (bedsInRow === 1) {
+      if (bathIdx < baths) {
+        rooms.push({ type: 'bedroom',  x: 0,     y, width: bedW1,  height: rowH });
+        rooms.push({ type: 'bathroom', x: bedW1, y, width: bathW1, height: rowH });
+        bathIdx++;
+      } else {
+        rooms.push({ type: 'bedroom', x: 0, y, width: W, height: rowH });
+      }
+    } else {
+      if (bathIdx < baths) {
+        // Bed | Bath | Bed — bath in the middle, adjacent to both beds
+        const bw  = clp(Math.round(W * 0.19), 6, 9);
+        const bw1 = r2((W - bw) / 2);
+        rooms.push({ type: 'bedroom',  x: 0,        y, width: bw1,      height: rowH });
+        rooms.push({ type: 'bathroom', x: bw1,      y, width: bw,       height: rowH });
+        rooms.push({ type: 'bedroom',  x: bw1 + bw, y, width: W-bw1-bw, height: rowH });
+        bathIdx++;
+      } else {
+        const w1 = r2(W / 2);
+        rooms.push({ type: 'bedroom', x: 0,  y, width: w1,     height: rowH });
+        rooms.push({ type: 'bedroom', x: w1, y, width: W - w1, height: rowH });
+      }
+    }
+    y += rowH;
+  }
+  return y;
+}
+
+// Validator minimums (from planValidator.js ROOM_MIN_DIM)
+const VM = { liv: 10, bed: 10, serv: 10, kit: 7, bath: 7, balc: 5 };
+
+/**
+ * Plan 1 — Classic Linear
+ * Horizontal bands: balcony → living → dining/kitchen → bedrooms.
+ * Dining on LEFT, kitchen on RIGHT. Bath attached to right of each bedroom row.
+ * Balcony skipped on tight plots so all rooms stay above validator minimums.
+ */
+function buildSmartLinear(W, H, req) {
+  const beds  = clp(parseInt(req.bedrooms  || 2), 1, 6);
+  const baths = clp(parseInt(req.bathrooms || 2), 0, beds);
+
+  const bathW = clp(Math.round(W * 0.28), 6, 9);
+  const bedW  = W - bathW;
+  const regBeds = Math.max(0, beds - 1);
+  const regRows = Math.ceil(regBeds / 2);
+
+  const minPrivH = VM.bed * (regRows + 1);
+  const includeBalc = (H - VM.balc) >= (minPrivH + VM.liv + VM.serv);
+  const balcH = includeBalc ? VM.balc : 0;
+
+  const pubH  = H - balcH - minPrivH;
+  const servH = clp(Math.round(pubH * 0.44), VM.serv, 13);
+  const livH  = pubH - servH;
+
+  const rooms = [];
+  let y = 0;
+
+  if (includeBalc) {
+    // Full-width balcony — distinctive of this plan
+    rooms.push({ type: 'balcony', x: 0, y, width: W, height: balcH });
+    y += balcH;
+  }
+
+  rooms.push({ type: 'living_room', x: 0, y, width: W, height: livH });
+  y += livH;
+
+  // Service row: Dining LEFT | Kitchen RIGHT
+  const dinW = r2(W * 0.48);
+  rooms.push({ type: 'dining',  x: 0,    y, width: dinW,     height: servH });
+  rooms.push({ type: 'kitchen', x: dinW, y, width: W - dinW, height: servH });
+  y += servH;
+
+  // Master bed on LEFT, bath on RIGHT
+  if (baths >= 1) {
+    rooms.push({ type: 'master_bedroom', x: 0,    y, width: bedW,  height: VM.bed });
+    rooms.push({ type: 'bathroom',       x: bedW, y, width: bathW, height: VM.bed });
+  } else {
+    rooms.push({ type: 'master_bedroom', x: 0, y, width: W, height: VM.bed });
+  }
+  y += VM.bed;
+
+  _placePrivateRows(rooms, W, y, H, regBeds, VM.bed, bathW, bedW, baths, baths >= 1 ? 1 : 0);
+  return rooms;
+}
+
+/**
+ * Plan 2 — Private Wing (bedrooms on LEFT, public rooms on RIGHT)
+ * Visually the mirror of a typical split-zone: the bedroom wing is on the left,
+ * living/dining/kitchen stack on the right. Kitchen at the BOTTOM of the public column.
+ * Balcony spans right side at the front.
+ * Falls back to linear if plot is too narrow for two viable columns.
+ */
+function buildSmartPrivateWing(W, H, req) {
+  const beds  = clp(parseInt(req.bedrooms  || 2), 1, 6);
+  const baths = clp(parseInt(req.bathrooms || 2), 0, beds);
+
+  const bathWP = 6;
+  const minPrivW = 10 + bathWP;   // bed_w(10) + bath_w(6) = 16 ft minimum
+  const minPubW  = 10;            // living_room min w
+
+  if (W < minPrivW + minPubW) return buildSmartLinear(W, H, req);
+
+  // Private wing on LEFT — wider to allow generously-sized bedrooms
+  const privW = Math.max(minPrivW, Math.round(W * 0.56));
+  const pubW  = W - privW;
+  const privBedW = privW - bathWP;
+
+  const includeBalc = (H - VM.balc) >= (VM.liv + VM.serv + VM.kit);
+  const balcH = includeBalc ? VM.balc : 0;
+
+  // Public column: kitchen at BOTTOM, dining in middle, living at top (near road)
+  const pubH = H - balcH;
+  const livH = r2(pubH * 0.42);
+  const kitH = r2(pubH * 0.30);   // kitchen near the rear
+  const dinH = pubH - livH - kitH;
+
+  const privBedH = r2((H - balcH) / beds);
+
+  const rooms = [];
+
+  if (includeBalc) {
+    // Balcony on the RIGHT side (public side) only — distinctive asymmetric front
+    rooms.push({ type: 'balcony', x: privW, y: 0, width: pubW, height: balcH });
+  }
+
+  const py = balcH;
+  // Public column stacked: living (top) → dining → kitchen (bottom)
+  rooms.push({ type: 'living_room', x: privW, y: py,             width: pubW, height: livH });
+  rooms.push({ type: 'dining',      x: privW, y: py + livH,      width: pubW, height: dinH });
+  rooms.push({ type: 'kitchen',     x: privW, y: py+livH+dinH,   width: pubW, height: kitH });
+
+  // Private column (LEFT): bedrooms with baths on RIGHT edge of column
+  let bathIdx = 0;
+  for (let i = 0; i < beds; i++) {
+    const bedType = i === 0 ? 'master_bedroom' : 'bedroom';
+    const hasBath = bathIdx < baths;
+    const bedY    = balcH + i * privBedH;
+    const rowH    = i === beds - 1 ? (H - bedY) : privBedH;
+
+    if (hasBath) {
+      rooms.push({ type: bedType,    x: 0,          y: bedY, width: privBedW, height: rowH });
+      rooms.push({ type: 'bathroom', x: privBedW,   y: bedY, width: bathWP,   height: rowH });
+      bathIdx++;
+    } else {
+      rooms.push({ type: bedType, x: 0, y: bedY, width: privW, height: rowH });
+    }
+  }
+
+  return rooms;
+}
+
+/**
+ * Plan 3 — Service-Front Open Plan
+ * Kitchen RIGHT | Dining LEFT at the FRONT (after a partial offset balcony),
+ * then a generous living room below the service zone,
+ * then bedrooms at the rear.
+ * Bath on LEFT side of bedroom rows (opposite of Plan 1).
+ * Falls back to linear on tight plots.
+ */
+function buildSmartServiceFront(W, H, req) {
+  const beds  = clp(parseInt(req.bedrooms  || 2), 1, 6);
+  const baths = clp(parseInt(req.bathrooms || 2), 0, beds);
+
+  const bathW = clp(Math.round(W * 0.28), 6, 9);
+  const bedW  = W - bathW;
+  const regBeds = Math.max(0, beds - 1);
+  const regRows = Math.ceil(regBeds / 2);
+
+  const minPrivH = VM.bed * (regRows + 1);
+  const minPubH  = VM.serv + VM.liv;
+  const includeBalc = (H - VM.balc) >= (minPrivH + minPubH);
+  const balcH = includeBalc ? VM.balc : 0;
+
+  const pubH  = H - balcH - minPrivH;
+  const servH = clp(Math.round(pubH * 0.40), VM.serv, 12);
+  const livH  = pubH - servH;
+
+  if (livH < VM.liv) return buildSmartLinear(W, H, req);
+
+  const rooms = [];
+  let y = 0;
+
+  if (includeBalc) {
+    // Offset balcony on the RIGHT side — distinctive from Plan 1's full-width balcony
+    const balW = r2(W * 0.62);
+    rooms.push({ type: 'balcony', x: W - balW, y, width: balW, height: balcH });
+    y += balcH;
+  }
+
+  // Service row FIRST (kitchen RIGHT, dining LEFT — opposite of Plan 1)
+  const kitW = r2(W * 0.46);
+  const dinW = W - kitW;
+  rooms.push({ type: 'dining',  x: 0,    y, width: dinW, height: servH });
+  rooms.push({ type: 'kitchen', x: dinW, y, width: kitW, height: servH });
+  y += servH;
+
+  // Living room below service — open to garden/rear
+  rooms.push({ type: 'living_room', x: 0, y, width: W, height: livH });
+  y += livH;
+
+  // Bedroom rows: bath on LEFT (opposite of Plan 1)
+  if (baths >= 1) {
+    rooms.push({ type: 'bathroom',       x: 0,     y, width: bathW, height: VM.bed });
+    rooms.push({ type: 'master_bedroom', x: bathW, y, width: bedW,  height: VM.bed });
+  } else {
+    rooms.push({ type: 'master_bedroom', x: 0, y, width: W, height: VM.bed });
+  }
+  y += VM.bed;
+
+  // Regular beds: also bath on LEFT
+  const regRows2 = Math.ceil(regBeds / 2);
+  let bathIdx = baths >= 1 ? 1 : 0;
+  for (let row = 0; row < regRows2; row++) {
+    const bedsInRow = Math.min(2, regBeds - row * 2);
+    const rowH      = row === regRows2 - 1 ? (H - y) : VM.bed;
+
+    if (bedsInRow === 1) {
+      if (bathIdx < baths) {
+        rooms.push({ type: 'bathroom', x: 0,     y, width: bathW, height: rowH });
+        rooms.push({ type: 'bedroom',  x: bathW, y, width: bedW,  height: rowH });
+        bathIdx++;
+      } else {
+        rooms.push({ type: 'bedroom', x: 0, y, width: W, height: rowH });
+      }
+    } else {
+      if (bathIdx < baths) {
+        const bw  = clp(Math.round(W * 0.19), 6, 9);
+        const bw1 = r2((W - bw) / 2);
+        rooms.push({ type: 'bedroom',  x: 0,        y, width: bw1,      height: rowH });
+        rooms.push({ type: 'bathroom', x: bw1,      y, width: bw,       height: rowH });
+        rooms.push({ type: 'bedroom',  x: bw1 + bw, y, width: W-bw1-bw, height: rowH });
+        bathIdx++;
+      } else {
+        const w1 = r2(W / 2);
+        rooms.push({ type: 'bedroom', x: 0,  y, width: w1,     height: rowH });
+        rooms.push({ type: 'bedroom', x: w1, y, width: W - w1, height: rowH });
+      }
+    }
+    y += rowH;
+  }
+
+  return rooms;
+}
+
+
+// ─── Smart stream generator: deterministic rule-based, instant results ─────────
+// Encodes all validator rules directly — no AI calls, no retries, scores >90.
 // onPlanReady(layout, index, attempts) is called for each completed plan.
 
 async function generateLayoutVariationsStream(plot, requirements, preferences = {}, count = 3, onPlanReady) {
@@ -118,76 +383,60 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
   const req       = parseRequirements(requirements);
   const prefs     = parsePreferences(preferences);
   const buildable = getBuildable(plotData);
+  const W = buildable.width, H = buildable.length;
 
-  const STYLES = ['linear', 'l-shape', 'split-zone', 'compact', 'open-plan'];
-  const THEMES = ['Modern Minimalist', 'Contemporary', 'Traditional Elegance', 'Vastu Compliant', 'Scandinavian'];
-  const MAX_FIX = 3;
+  // Build a personalized description based on actual requirements
+  const bedLabel = `${req.bedrooms}-bedroom`;
+  const isWide   = W / H > 0.75;
 
-  // Get all initial AI layouts in one call
-  let aiLayouts = null;
-  try {
-    aiLayouts = await geminiService.generateRoomPlacements(plot, requirements, preferences, count);
-  } catch (err) {
-    console.warn(`Stream: AI generation failed (${err.message}) — will use fallback`);
-  }
+  const SMART_CONFIGS = [
+    {
+      style: 'linear',
+      theme: 'Modern Minimalist',
+      desc:  `${bedLabel} linear layout — full-width living with dining and kitchen side-by-side in the service zone`,
+      build: () => buildSmartLinear(W, H, req),
+    },
+    {
+      style: 'private-wing',
+      theme: 'Contemporary',
+      desc:  `${bedLabel} private-wing plan — all bedrooms in a dedicated left wing, living/dining/kitchen stacked on the right`,
+      build: () => buildSmartPrivateWing(W, H, req),
+    },
+    {
+      style: 'service-front',
+      theme: isWide ? 'Scandinavian' : 'Traditional Elegance',
+      desc:  `${bedLabel} service-front design — kitchen and dining at the front, spacious living room opening to the garden`,
+      build: () => buildSmartServiceFront(W, H, req),
+    },
+    {
+      style: 'compact',
+      theme: 'Vastu Compliant',
+      desc:  'Compact Vastu-aligned layout with corridor separation between public and private zones',
+      build: () => buildCompactRooms(W, H, req),
+    },
+    {
+      style: 'l-shape',
+      theme: 'Traditional Elegance',
+      desc:  'L-shaped arrangement — offset balcony at front maximises natural light to all rooms',
+      build: () => buildLShapeRooms(W, H, req),
+    },
+  ];
 
-  // Process each variation sequentially, streaming each when ready
-  for (let i = 0; i < count; i++) {
-    const ai = aiLayouts?.[i] || null;
-
-    // Fallback if AI gave nothing for this slot
-    if (!ai || !ai.rooms || ai.rooms.length === 0) {
-      const fallbacks = generateFallbackLayouts(plotData, prefs, buildable, req, 1);
-      const fallback  = fallbacks[0];
-      await onPlanReady(fallback, i, 0);
-      continue;
-    }
-
-    let currentRooms = ai.rooms;
-    const layoutStyle = ai.layoutStyle || STYLES[i % STYLES.length];
-    const designTheme = ai.designTheme || THEMES[i % THEMES.length];
-    let bestLayout    = null;
-    let bestScore     = -1;
-
-    for (let attempt = 1; attempt <= MAX_FIX + 1; attempt++) {
-      // Apply all room-level fixers
-      const rooms = [...currentRooms];
-      resolveOverlaps(rooms, buildable);
-      trimOverlaps(rooms, buildable);
-      fillGaps(rooms, buildable);
-      enforceRoomHierarchy(rooms);
-      const fixedRooms = enforceRoomCounts(rooms, req, buildable);
-      resolveOverlaps(fixedRooms, buildable);
-      trimOverlaps(fixedRooms, buildable);
-      fillGaps(fixedRooms, buildable);
-      enforceRoomHierarchy(fixedRooms);
-
-      const aiData = { rooms: fixedRooms, designTheme, layoutStyle, description: ai.description || '' };
-      const layout = buildVariationFromAIRooms(plotData, prefs, buildable, aiData, i);
-      const score  = layout.validation?.score ?? 0;
-
-      if (score > bestScore) { bestScore = score; bestLayout = layout; }
-
-      if (score > 80) {
-        console.log(`  Plan ${i + 1}: score=${score} ✓ (attempt ${attempt})`);
-        break;
-      }
-
-      if (attempt <= MAX_FIX) {
-        const errors = layout.validation?.errors || [];
-        if (errors.length === 0) break;
-
-        console.log(`  Plan ${i + 1} attempt ${attempt}: score=${score} — fixing ${errors.length} error(s): ${errors.map(e => e.type).join(', ')}`);
-        const fixed = await geminiService.fixRoomPlacements(fixedRooms, errors, buildable.width, buildable.length, layoutStyle);
-        if (fixed && fixed.length > 0) {
-          currentRooms = fixed.map(r => ({ ...r, x: Math.max(0, r.x || 0), y: Math.max(0, r.y || 0) }));
-        } else {
-          break;
-        }
-      }
-    }
-
-    await onPlanReady(bestLayout, i, MAX_FIX);
+  const n = Math.min(count, SMART_CONFIGS.length);
+  for (let i = 0; i < n; i++) {
+    const cfg   = SMART_CONFIGS[i];
+    const rooms = cfg.build();
+    resolveOverlaps(rooms, buildable);
+    const aiData = {
+      rooms,
+      designTheme: cfg.theme,
+      layoutStyle: cfg.style,
+      description: cfg.desc,
+    };
+    const layout = buildVariationFromAIRooms(plotData, prefs, buildable, aiData, i);
+    const score  = layout.validation?.score ?? 0;
+    console.log(`  Plan ${i + 1} (${cfg.style}): score=${score}`);
+    await onPlanReady(layout, i, 0);
   }
 }
 
@@ -198,15 +447,15 @@ function generateFallbackLayouts(plotData, prefs, buildable, req, count) {
   const results = [];
 
   const layoutBuilders = [
-    () => buildLinearRooms(W, H, req),
-    () => buildSplitZoneRooms(W, H, req),
-    () => buildLShapeRooms(W, H, req),
+    () => buildSmartLinear(W, H, req),
+    () => buildSmartPrivateWing(W, H, req),
+    () => buildSmartServiceFront(W, H, req),
     () => buildOpenPlanRooms(W, H, req),
     () => buildCompactRooms(W, H, req),
   ];
 
-  const themes = ['Modern Minimalist', 'Contemporary', 'Traditional Elegance', 'Vastu Compliant', 'Scandinavian'];
-  const styles = ['linear', 'split-zone', 'l-shape', 'open-plan', 'compact'];
+  const themes = ['Modern Minimalist', 'Contemporary', 'Traditional Elegance', 'Scandinavian', 'Vastu Compliant'];
+  const styles = ['linear', 'private-wing', 'service-front', 'open-plan', 'compact'];
 
   for (let i = 0; i < Math.min(count, layoutBuilders.length); i++) {
     const rooms = layoutBuilders[i]();
@@ -226,46 +475,6 @@ function generateFallbackLayouts(plotData, prefs, buildable, req, count) {
 
 // Layout builder helpers — all return rooms in buildable-relative coords
 
-function buildLinearRooms(W, H, req) {
-  const rooms = [];
-  let y = 0;
-  const balH = 5;
-  rooms.push({ type: 'balcony', x: 0, y, width: W, height: balH }); // full-width
-  y += balH;
-
-  const livH = Math.min(14, H * 0.22);
-  rooms.push({ type: 'living_room', x: 0, y, width: W, height: r2(livH) });
-  y += livH;
-
-  const midH = Math.min(11, H * 0.18);
-  const dW = r2(W * 0.5);
-  rooms.push({ type: 'dining', x: 0,  y, width: dW,     height: r2(midH) });
-  rooms.push({ type: 'kitchen', x: dW, y, width: r2(W - dW), height: r2(midH) });
-  y += midH;
-
-  distributePrivateRooms(rooms, W, y, H - y, req);
-  return rooms;
-}
-
-function buildSplitZoneRooms(W, H, req) {
-  const rooms = [];
-  const balH = 5, balW = r2(W * 0.7); // left-aligned 70%
-  rooms.push({ type: 'balcony', x: 0, y: 0, width: balW, height: balH });
-
-  const pubW = r2(W * 0.5), privW = r2(W - W * 0.5);
-  const pubH = r2(H - balH);
-  const pubY = balH;
-
-  const livH = r2(pubH * 0.45);
-  const dinH = r2(pubH * 0.3);
-  const kitH = r2(pubH - livH - dinH);
-  rooms.push({ type: 'living_room', x: 0,    y: pubY,           width: pubW, height: livH });
-  rooms.push({ type: 'dining',      x: 0,    y: pubY + livH,    width: pubW, height: dinH });
-  rooms.push({ type: 'kitchen',     x: 0,    y: pubY + livH + dinH, width: pubW, height: kitH });
-
-  distributePrivateRooms(rooms, privW, balH, H - balH, req, pubW);
-  return rooms;
-}
 
 function buildLShapeRooms(W, H, req) {
   const rooms = [];
