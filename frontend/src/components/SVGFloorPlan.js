@@ -448,35 +448,68 @@ export default function SVGFloorPlan({ layout }) {
           {/* ═══ LAYER 6 — Doors + Windows ═══════════════════════════════════ */}
           {layers.symbols && (
             <g>
-              {/* Parking sliding gate — rendered before doors so it sits at road edge */}
-              {layout.parking?.gate && (() => {
-                const g   = layout.parking.gate;
-                const gx  = px(g.x), gy = py(0);
-                const gw  = g.width * scale;
-                const gh  = Math.max(6, scale * 0.6);
-                // Two sliding panels — left slides left, right slides right
-                const hw  = gw / 2;
+              {/* ── Main gate at road boundary ──────────────────────────── */}
+              {layout.parking && (() => {
+                const park   = layout.parking;
+                const facing = (plot.facing || 'north').toLowerCase();
+
+                // Gate position: road-facing edge of the plot
+                const gx = px(park.x);
+                const gw = park.width * scale;
+                const POST = Math.max(5, scale * 0.5);  // pillar size px
+
+                let gy, labelY, arrowY1, arrowY2;
+                if (facing === 'north') {
+                  gy = py(0); labelY = gy - 10; arrowY1 = gy - 4; arrowY2 = gy + 10;
+                } else if (facing === 'south') {
+                  gy = py(plot.length); labelY = gy + 14; arrowY1 = gy + 4; arrowY2 = gy - 10;
+                } else {
+                  return null; // east/west handled differently — skip for now
+                }
+
+                const hw = gw / 2;
+                const panelH = Math.max(8, scale * 0.8);
+
                 return (
                   <g>
-                    {/* Gate gap on road boundary */}
-                    <rect x={gx} y={gy - 1} width={gw} height={gh + 2} fill="#f5f2ea"/>
-                    {/* Left panel */}
-                    <rect x={gx} y={gy} width={hw - 1} height={gh}
-                      fill="#c8c0b0" stroke="#888" strokeWidth="0.8" rx="1"/>
-                    <line x1={gx + hw * 0.33} y1={gy + 1} x2={gx + hw * 0.33} y2={gy + gh - 1}
-                      stroke="#aaa" strokeWidth="0.6"/>
-                    <line x1={gx + hw * 0.66} y1={gy + 1} x2={gx + hw * 0.66} y2={gy + gh - 1}
-                      stroke="#aaa" strokeWidth="0.6"/>
-                    {/* Right panel */}
-                    <rect x={gx + hw + 1} y={gy} width={hw - 1} height={gh}
-                      fill="#c8c0b0" stroke="#888" strokeWidth="0.8" rx="1"/>
-                    <line x1={gx + hw + 1 + hw * 0.33} y1={gy + 1} x2={gx + hw + 1 + hw * 0.33} y2={gy + gh - 1}
-                      stroke="#aaa" strokeWidth="0.6"/>
-                    <line x1={gx + hw + 1 + hw * 0.66} y1={gy + 1} x2={gx + hw + 1 + hw * 0.66} y2={gy + gh - 1}
-                      stroke="#aaa" strokeWidth="0.6"/>
-                    {/* GATE label */}
-                    <text x={gx + gw / 2} y={gy - 3} textAnchor="middle"
-                      fontSize="6" fill="#888" fontFamily="monospace">GATE</text>
+                    {/* Clear gap in boundary line where gate is */}
+                    <rect x={gx} y={gy - 2} width={gw} height={panelH + 4} fill="#f5f2ea"/>
+
+                    {/* Left gate pillar */}
+                    <rect x={gx - POST / 2} y={gy - POST * 0.4} width={POST} height={POST * 1.8}
+                      fill="#7a6a5a" stroke="#555" strokeWidth="0.8" rx="1"/>
+                    {/* Right gate pillar */}
+                    <rect x={gx + gw - POST / 2} y={gy - POST * 0.4} width={POST} height={POST * 1.8}
+                      fill="#7a6a5a" stroke="#555" strokeWidth="0.8" rx="1"/>
+
+                    {/* Left sliding panel */}
+                    <rect x={gx + POST / 2} y={gy} width={hw - POST - 1} height={panelH}
+                      fill="#c8c0b0" stroke="#777" strokeWidth="1" rx="1.5"/>
+                    <line x1={gx + POST / 2 + (hw - POST) * 0.35} y1={gy + 1.5}
+                          x2={gx + POST / 2 + (hw - POST) * 0.35} y2={gy + panelH - 1.5}
+                      stroke="#aaa" strokeWidth="0.7"/>
+                    <line x1={gx + POST / 2 + (hw - POST) * 0.70} y1={gy + 1.5}
+                          x2={gx + POST / 2 + (hw - POST) * 0.70} y2={gy + panelH - 1.5}
+                      stroke="#aaa" strokeWidth="0.7"/>
+
+                    {/* Right sliding panel */}
+                    <rect x={gx + hw + 1} y={gy} width={hw - POST - 1} height={panelH}
+                      fill="#c8c0b0" stroke="#777" strokeWidth="1" rx="1.5"/>
+                    <line x1={gx + hw + 1 + (hw - POST) * 0.35} y1={gy + 1.5}
+                          x2={gx + hw + 1 + (hw - POST) * 0.35} y2={gy + panelH - 1.5}
+                      stroke="#aaa" strokeWidth="0.7"/>
+                    <line x1={gx + hw + 1 + (hw - POST) * 0.70} y1={gy + 1.5}
+                          x2={gx + hw + 1 + (hw - POST) * 0.70} y2={gy + panelH - 1.5}
+                      stroke="#aaa" strokeWidth="0.7"/>
+
+                    {/* Arrow indicating vehicle entry direction */}
+                    <line x1={gx + gw / 2} y1={arrowY1} x2={gx + gw / 2} y2={arrowY2}
+                      stroke="#cc4400" strokeWidth="1.2" strokeDasharray="3 2"/>
+
+                    {/* MAIN GATE label */}
+                    <text x={gx + gw / 2} y={labelY} textAnchor="middle"
+                      fontSize="7.5" fontWeight="700" fill="#7a4400" fontFamily="monospace"
+                      letterSpacing="0.5">MAIN GATE</text>
                   </g>
                 );
               })()}

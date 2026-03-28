@@ -334,10 +334,10 @@ function buildModel(scene, layout, camera, controls, setStats) {
     m.receiveShadow = true;
     scene.add(m);
   };
-  addSb(0, 0,                   plot.width, sb.back);
-  addSb(0, plot.length-sb.front, plot.width, sb.front);
-  addSb(0, sb.back,              sb.left,   plot.length - sb.back - sb.front);
-  addSb(plot.width-sb.right, sb.back, sb.right, plot.length - sb.back - sb.front);
+  addSb(0, 0,                    plot.width, sb.front);  // front setback (road side, z=0)
+  addSb(0, plot.length-sb.back,  plot.width, sb.back);   // rear setback
+  addSb(0, sb.front,             sb.left,   plot.length - sb.front - sb.back);  // left
+  addSb(plot.width-sb.right, sb.front, sb.right, plot.length - sb.front - sb.back); // right
 
   // ── Buildable floor slab ──────────────────────────────────────────────────
   const bldW = plot.width  - sb.left - sb.right;
@@ -346,7 +346,7 @@ function buildModel(scene, layout, camera, controls, setStats) {
     new THREE.BoxGeometry(s(bldW), 0.1, s(bldD)),
     new THREE.MeshStandardMaterial({ color: 0x7a7265, roughness: 0.8 })
   );
-  bldFloor.position.set(s(sb.left + bldW/2), 0.09, s(sb.back + bldD/2));
+  bldFloor.position.set(s(sb.left + bldW/2), 0.09, s(sb.front + bldD/2));
   bldFloor.receiveShadow = true;
   scene.add(bldFloor);
 
@@ -412,13 +412,69 @@ function buildModel(scene, layout, camera, controls, setStats) {
   const extMat = new THREE.MeshStandardMaterial({ color: 0xfaf5ee, roughness: 0.65, metalness: 0.03 });
   const extH   = s(WALL_H + 0.6);
   const extT   = WALL_T * 2.2;
-  const ox = s(sb.left), oz = s(sb.back);
+  const ox = s(sb.left), oz = s(sb.front);
   const ew = s(bldW), ed = s(bldD);
   const ey = extH/2 + 0.12;
   makeWallBox(ox + ew/2,          ey, oz + extT/2,         ew + extT*2, extH, extT,   extMat);
   makeWallBox(ox + ew/2,          ey, oz + ed - extT/2,    ew + extT*2, extH, extT,   extMat);
   makeWallBox(ox + extT/2,        ey, oz + ed/2,           extT,        extH, ed,     extMat);
   makeWallBox(ox + ew - extT/2,   ey, oz + ed/2,           extT,        extH, ed,     extMat);
+
+  // ── Main gate (at road boundary) ──────────────────────────────────────────
+  if (layout.parking) {
+    const park     = layout.parking;
+    const facing   = (plot.facing || 'north').toLowerCase();
+    const gateX    = s(park.x);
+    const gateW    = s(park.width);
+    const POST_W   = s(1.2);
+    const POST_H   = s(5);
+    const pillarMat = new THREE.MeshStandardMaterial({ color: 0x8a7a6a, roughness: 0.7 });
+    const barMat    = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.4, metalness: 0.5 });
+
+    // Only handle north/south for now (most common)
+    if (facing === 'north' || facing === 'south') {
+      const gateZ = facing === 'north' ? 0 : s(plot.length);
+
+      // Left pillar
+      const pillarGeo = new THREE.BoxGeometry(POST_W, POST_H, POST_W);
+      const lp = new THREE.Mesh(pillarGeo, pillarMat.clone());
+      lp.position.set(gateX, POST_H / 2, gateZ);
+      lp.castShadow = true; scene.add(lp);
+      const lpEdge = new THREE.LineSegments(new THREE.EdgesGeometry(pillarGeo, 15), wallEdgeMat.clone());
+      lpEdge.position.copy(lp.position); scene.add(lpEdge);
+
+      // Right pillar
+      const rp = new THREE.Mesh(pillarGeo, pillarMat.clone());
+      rp.position.set(gateX + gateW, POST_H / 2, gateZ);
+      rp.castShadow = true; scene.add(rp);
+      const rpEdge = new THREE.LineSegments(new THREE.EdgesGeometry(pillarGeo, 15), wallEdgeMat.clone());
+      rpEdge.position.copy(rp.position); scene.add(rpEdge);
+
+      // Gate bar (two horizontal bars across opening)
+      const barH = POST_H * 0.75;
+      const barGeo = new THREE.BoxGeometry(gateW - POST_W * 2, s(0.15), s(0.12));
+      const bar1 = new THREE.Mesh(barGeo, barMat.clone());
+      bar1.position.set(gateX + gateW / 2, barH * 0.55, gateZ);
+      scene.add(bar1);
+      const bar2 = bar1.clone();
+      bar2.position.set(gateX + gateW / 2, barH * 0.30, gateZ);
+      scene.add(bar2);
+
+      // GATE label
+      const gateLbl = makeDoorSprite('MAIN GATE', '#4B3A2A');
+      gateLbl.position.set(gateX + gateW / 2, POST_H + 0.5, gateZ);
+      scene.add(gateLbl);
+
+      // Driveway surface (coloured strip from road boundary to parking)
+      const drivewayMat = new THREE.MeshStandardMaterial({ color: 0x5a5040, roughness: 0.9 });
+      const driveW = gateW - POST_W * 2;
+      const driveD = s(sb.front);
+      const driveway = new THREE.Mesh(new THREE.BoxGeometry(driveW, 0.07, driveD), drivewayMat);
+      driveway.position.set(gateX + gateW / 2, 0.065, driveD / 2);
+      driveway.receiveShadow = true;
+      scene.add(driveway);
+    }
+  }
 
   // ── Doors ─────────────────────────────────────────────────────────────────
   const doorCount = drawDoors(scene, doors, s, WALL_H);

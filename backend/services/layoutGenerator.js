@@ -954,7 +954,7 @@ function placeParking(plotData, _buildable, parkPrefs = {}) {
     // Road on left (west) or right (east): parking is a vertical strip along that side
     w = PARK_L;
     h = r2(PARK_W * cars);
-    y = dir === 'right' ? plotData.length - h - sb.front : sb.back;
+    y = dir === 'right' ? plotData.length - h - sb.back : sb.front;
     x = facing === 'east' ? plotData.width - w : 0;
   }
 
@@ -965,10 +965,10 @@ function placeParking(plotData, _buildable, parkPrefs = {}) {
 function buildSetbackZones(plotData) {
   const sb = plotData.setback;
   return [
-    { x: 0, y: 0, width: plotData.width, height: sb.back, label: 'Front Setback', zone: 'front' },
-    { x: 0, y: plotData.length - sb.front, width: plotData.width, height: sb.front, label: 'Rear Setback', zone: 'rear' },
-    { x: 0, y: sb.back, width: sb.left, height: plotData.length - sb.back - sb.front, label: 'Left Setback', zone: 'left' },
-    { x: plotData.width - sb.right, y: sb.back, width: sb.right, height: plotData.length - sb.back - sb.front, label: 'Right Setback', zone: 'right' },
+    { x: 0, y: 0, width: plotData.width, height: sb.front, label: 'Front Setback', zone: 'front' },
+    { x: 0, y: plotData.length - sb.back, width: plotData.width, height: sb.back, label: 'Rear Setback', zone: 'rear' },
+    { x: 0, y: sb.front, width: sb.left, height: plotData.length - sb.front - sb.back, label: 'Left Setback', zone: 'left' },
+    { x: plotData.width - sb.right, y: sb.front, width: sb.right, height: plotData.length - sb.front - sb.back, label: 'Right Setback', zone: 'right' },
   ];
 }
 
