@@ -210,28 +210,132 @@ function ArchitectView({ plan, onClose }) {
   );
 }
 
+// ─── Skeleton card while a plan is still generating ──────────────────────────
+function PlanSkeleton({ index }) {
+  return (
+    <div style={{
+      padding: '10px 12px', borderRadius: 10,
+      border: '1px solid #e5e7eb', background: '#fff',
+      animation: 'pulse 1.5s ease-in-out infinite',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#d1d5db' }} />
+        <div style={{ height: 12, width: 100, background: '#e5e7eb', borderRadius: 4 }} />
+      </div>
+      <div style={{ height: 10, width: 140, background: '#f3f4f6', borderRadius: 4, marginBottom: 8 }} />
+      <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ height: 18, width: 60, background: '#f3f4f6', borderRadius: 4 }} />
+        <div style={{ height: 18, width: 40, background: '#dbeafe', borderRadius: 4 }} />
+      </div>
+      <div style={{ marginTop: 8, fontSize: 11, color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 5 }}>
+        <div style={{
+          width: 12, height: 12, border: '2px solid #93c5fd',
+          borderTopColor: 'transparent', borderRadius: '50%',
+          display: 'inline-block',
+          animation: 'spin 0.8s linear infinite',
+        }} />
+        Generating plan {index + 1}…
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
+const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5004/api';
+
 export default function PlanResults() {
   const navigate      = useNavigate();
   const location      = useLocation();
-  const [plans,        setPlans]        = useState([]);
+  // slots[0..2]: null = generating, plan object = ready
+  const [slots,        setSlots]        = useState([null, null, null]);
+  const [streaming,    setStreaming]     = useState(false);
   const [loading,      setLoading]      = useState(false);
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [show3D,       setShow3D]       = useState(false);
   const [showFull,     setShowFull]     = useState(false);
   const [showArch,     setShowArch]     = useState(false);
 
+  // Derive the plans array (skip nulls only for display purposes when not streaming)
+  const plans = slots.filter(Boolean);
+
   useEffect(() => {
-    if (location.state?.plans) {
-      setPlans(location.state.plans);
-      setSelectedPlan(location.state.plans[0] || null);
+    const state = location.state;
+
+    if (state?.generationParams) {
+      // ── Streaming path ────────────────────────────────────────────────────
+      setSlots([null, null, null]);
+      setStreaming(true);
+
+      const token = localStorage.getItem('token');
+      let aborted  = false;
+
+      (async () => {
+        try {
+          const response = await fetch(`${BASE_URL}/plans/generate-stream`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body:    JSON.stringify(state.generationParams),
+          });
+
+          if (!response.ok) {
+            toast.error('Failed to start plan generation');
+            setStreaming(false);
+            return;
+          }
+
+          const reader  = response.body.getReader();
+          const decoder = new TextDecoder();
+          let   buf     = '';
+
+          while (!aborted) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop(); // keep incomplete last line
+
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              try {
+                const event = JSON.parse(line.slice(6));
+
+                if (event.type === 'plan') {
+                  setSlots(prev => {
+                    const next = [...prev];
+                    next[event.index] = event.plan;
+                    return next;
+                  });
+                  // Auto-select first plan that arrives
+                  setSelectedPlan(prev => prev ?? event.plan);
+                } else if (event.type === 'error') {
+                  toast.error(`Generation error: ${event.message}`);
+                }
+              } catch { /* malformed line */ }
+            }
+          }
+        } catch (err) {
+          if (!aborted) toast.error('Connection lost during generation');
+        } finally {
+          if (!aborted) setStreaming(false);
+        }
+      })();
+
+      return () => { aborted = true; };
+
+    } else if (state?.plans) {
+      // ── Legacy path: plans already in state ──────────────────────────────
+      setSlots(state.plans.slice(0, 3));
+      setSelectedPlan(state.plans[0] || null);
+
     } else {
+      // ── Fallback: load from API ───────────────────────────────────────────
       (async () => {
         setLoading(true);
         try {
           const res = await api.get('/plans');
           const p   = res.data.data.plans;
-          setPlans(p);
+          setSlots(p.slice(0, 3));
           setSelectedPlan(p[0] || null);
         } catch { toast.error('Failed to fetch plans'); }
         finally   { setLoading(false); }
@@ -300,14 +404,17 @@ export default function PlanResults() {
 
         {/* ── Plan list ── */}
         <div className="lg:col-span-1" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest" style={{ marginBottom: 4 }}>Plans</p>
-          {plans.length === 0
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest" style={{ marginBottom: 4 }}>
+            Plans {streaming && <span style={{ color: '#3b82f6', fontWeight: 400, textTransform: 'none' }}>— generating…</span>}
+          </p>
+          {!streaming && plans.length === 0
             ? <p className="text-sm text-gray-400">No plans yet. Generate some first.</p>
-            : plans.map(plan => {
+            : slots.map((plan, slotIndex) => {
+                if (!plan) return <PlanSkeleton key={slotIndex} index={slotIndex} />;
                 const meta     = plan.layoutJson?.metadata || {};
                 const val      = plan.layoutJson?.validation || null;
                 const score    = val?.score ?? null;
-                const isAI     = meta.generator === 'ai-enhanced' || meta.generator === 'ai-placement';
+                const isAI     = meta.generatorType === 'ai' || meta.generator === 'ai-enhanced' || meta.generator === 'ai-placement';
                 const selected = selectedPlan?._id === plan._id;
                 // Score dot: green ≥80, yellow 60-79, red <60 / no validation
                 const dotColor = score === null ? '#ccc'
@@ -337,10 +444,10 @@ export default function PlanResults() {
                             {plan.title}
                           </p>
                         </div>
-                        {meta.theme && (
+                        {(meta.designTheme || meta.theme) && (
                           <p style={{ fontSize: 11, color: '#888', margin: '2px 0 0 14px',
                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {meta.theme}
+                            {meta.designTheme || meta.theme}
                           </p>
                         )}
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5, alignItems: 'center' }}>

@@ -2,7 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const Plan = require('../models/Plan');
 const Plot = require('../models/Plot');
-const { generateLayout, generateLayoutVariations } = require('../services/layoutGenerator');
+const { generateLayout, generateLayoutVariations, generateLayoutVariationsStream } = require('../services/layoutGenerator');
 const { exportToSVG, exportToPDF, exportToDXF } = require('../services/exporter');
 
 const router = express.Router();
@@ -110,6 +110,68 @@ router.post('/generate', authMiddleware, async (req, res) => {
       error: error.message
     });
   }
+});
+
+// Stream floor plan generation — emits each plan via SSE as soon as score > 80
+router.post('/generate-stream', authMiddleware, async (req, res) => {
+  const { plot, requirements, preferences } = req.body;
+
+  if (!plot || !requirements) {
+    return res.status(400).json({ success: false, message: 'Plot and requirements are required' });
+  }
+
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const emit = (data) => {
+    if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Ensure a plot record exists
+  let plotId = null;
+  try {
+    let existing = await Plot.findOne({ userId: req.userId, width: plot.width, length: plot.length, facing: plot.facing });
+    if (!existing) {
+      const newPlot = new Plot({ ...plot, userId: req.userId });
+      await newPlot.save();
+      plotId = newPlot._id;
+    } else {
+      plotId = existing._id;
+    }
+  } catch (e) { /* non-fatal */ }
+
+  emit({ type: 'status', message: 'AI is designing your floor plans…' });
+
+  try {
+    let planIndex = 0;
+
+    await generateLayoutVariationsStream(plot, requirements, preferences, 3, async (layout, index, attempts) => {
+      planIndex++;
+      const score = layout.validation?.score ?? 0;
+
+      const plan = new Plan({
+        userId: req.userId,
+        plotId,
+        layoutJson: layout,
+        title: `Plan ${planIndex}`,
+        description: layout.metadata?.designTheme || 'AI-generated floor plan',
+      });
+      await plan.save();
+
+      emit({ type: 'plan', index, plan: plan.toObject(), score, attempts });
+    });
+
+    emit({ type: 'done', total: 3 });
+  } catch (err) {
+    console.error('generate-stream error:', err);
+    emit({ type: 'error', message: err.message });
+  }
+
+  res.end();
 });
 
 // Save a plot

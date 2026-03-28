@@ -365,6 +365,61 @@ Recommendations: [bullets]`;
     };
   }
 
+  // ─── Fix rooms based on validator errors ──────────────────────────────────
+
+  async fixRoomPlacements(rooms, validationErrors, bW, bL, layoutStyle) {
+    if (!this.isConfigured()) return null;
+
+    const errorList  = validationErrors.map((e, i) => `${i + 1}. ${e.message}`).join('\n');
+    const roomsJson  = JSON.stringify(rooms, null, 2);
+
+    const prompt = `You are a senior Indian residential architect fixing a floor plan. Correct EVERY listed error.
+
+═══ BUILDABLE AREA ═══
+Width: ${bW}ft  Depth: ${bL}ft
+All coordinates must satisfy: 0 ≤ x, x+width ≤ ${bW}, 0 ≤ y, y+height ≤ ${bL}
+
+═══ CURRENT ROOMS (buildable-relative) ═══
+${roomsJson}
+
+═══ ERRORS TO FIX ═══
+${errorList}
+
+═══ HARD RULES ═══
+1. BOUNDS: every room fully inside the buildable area
+2. NO OVERLAP: rooms must not intersect (touching edges OK)
+3. COVERAGE ≥ 95%: total room area ≥ ${Math.round(bW * bL * 0.95)} sq.ft — expand rooms or add rooms to fill gaps
+4. EN-SUITE: each bathroom must share a side wall with a bedroom (same y-band, touching on x-axis)
+5. BATHROOM: width 6–9ft, height 8–10ft
+6. BEDROOMS larger than bathrooms. Master ≥ 13×12ft. Regular ≥ 11×10ft
+7. LIVING ROOM largest habitable area
+8. Keep layout style: ${layoutStyle}
+
+Return ONLY the fixed rooms as a raw JSON array — no markdown, no text:
+[{"type":"...","x":...,"y":...,"width":...,"height":...}, ...]`;
+
+    try {
+      const result = await this.model.generateContent(prompt);
+      const text   = result.response.text();
+      const parsed = this.extractJSONArray(text);
+      if (!Array.isArray(parsed) || parsed.length === 0) return null;
+      return parsed;
+    } catch (err) {
+      console.error('Gemini fixRoomPlacements failed:', err.message);
+      return null;
+    }
+  }
+
+  // Extracts a JSON array from text (handles both [...] at root level)
+  extractJSONArray(text) {
+    const stripped = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    const s = stripped.indexOf('['), e = stripped.lastIndexOf(']');
+    if (s !== -1 && e !== -1) {
+      try { return JSON.parse(stripped.slice(s, e + 1)); } catch { /* */ }
+    }
+    return null;
+  }
+
   extractJSON(text) {
     const stripped = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
     const s = stripped.indexOf('['), e = stripped.lastIndexOf(']');

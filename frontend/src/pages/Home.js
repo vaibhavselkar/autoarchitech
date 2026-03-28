@@ -1,12 +1,9 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import api from '../services/api';
-import AILoadingScreen from '../components/AILoadingScreen';
 
 const Home = () => {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
 
   const [plotData, setPlotData] = useState({
     width: '',
@@ -46,36 +43,22 @@ const Home = () => {
   const [customIdea, setCustomIdea]     = useState('');
   const [showSetbacks, setShowSetbacks] = useState(false);
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
-    setLoading(true);
 
-    try {
-      // Validate plot data
-      if (!plotData.width || !plotData.length) {
-        toast.error('Please enter plot dimensions');
-        return;
-      }
-
-      const payload = {
-        plot: plotData,
-        requirements,
-        preferences: { ...preferences, customIdea: customIdea.trim() || undefined },
-        variations: 5
-      };
-
-      const response = await api.post('/plans/generate', payload);
-      
-      toast.success('Floor plans generated successfully!');
-      navigate('/results', { 
-        state: { plans: response.data.data.plans }
-      });
-      
-    } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to generate plans');
-    } finally {
-      setLoading(false);
+    if (!plotData.width || !plotData.length) {
+      toast.error('Please enter plot dimensions');
+      return;
     }
+
+    const payload = {
+      plot: plotData,
+      requirements,
+      preferences: { ...preferences, customIdea: customIdea.trim() || undefined },
+    };
+
+    // Navigate immediately — PlanResults handles streaming
+    navigate('/results', { state: { generationParams: payload } });
   };
 
   const updatePlotData = (field, value) => {
@@ -105,7 +88,6 @@ const Home = () => {
 
   return (
     <>
-    {loading && <AILoadingScreen />}
     <div className="max-w-4xl mx-auto">
       <div className="bg-white shadow-md rounded-lg p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-6">AutoArchitect Floor Plan Generator</h1>
@@ -413,17 +395,9 @@ const Home = () => {
           <div className="flex justify-end">
             <button
               type="submit"
-              disabled={loading}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-6 py-3 rounded-md text-lg font-medium transition-colors duration-200"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-md text-lg font-medium transition-colors duration-200"
             >
-              {loading ? (
-                <div className="flex items-center">
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                  Generating Plans...
-                </div>
-              ) : (
-                'Generate Floor Plans'
-              )}
+              Generate Floor Plans
             </button>
           </div>
         </form>

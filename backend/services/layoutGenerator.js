@@ -110,6 +110,87 @@ async function generateLayoutVariations(plot, requirements, preferences = {}, va
   return results;
 }
 
+// ─── Stream generator: emits each plan as soon as it passes score > 80 ────────
+// onPlanReady(layout, index, attempts) is called for each completed plan.
+
+async function generateLayoutVariationsStream(plot, requirements, preferences = {}, count = 3, onPlanReady) {
+  const plotData  = parsePlot(plot);
+  const req       = parseRequirements(requirements);
+  const prefs     = parsePreferences(preferences);
+  const buildable = getBuildable(plotData);
+
+  const STYLES = ['linear', 'l-shape', 'split-zone', 'compact', 'open-plan'];
+  const THEMES = ['Modern Minimalist', 'Contemporary', 'Traditional Elegance', 'Vastu Compliant', 'Scandinavian'];
+  const MAX_FIX = 3;
+
+  // Get all initial AI layouts in one call
+  let aiLayouts = null;
+  try {
+    aiLayouts = await geminiService.generateRoomPlacements(plot, requirements, preferences, count);
+  } catch (err) {
+    console.warn(`Stream: AI generation failed (${err.message}) — will use fallback`);
+  }
+
+  // Process each variation sequentially, streaming each when ready
+  for (let i = 0; i < count; i++) {
+    const ai = aiLayouts?.[i] || null;
+
+    // Fallback if AI gave nothing for this slot
+    if (!ai || !ai.rooms || ai.rooms.length === 0) {
+      const fallbacks = generateFallbackLayouts(plotData, prefs, buildable, req, 1);
+      const fallback  = fallbacks[0];
+      await onPlanReady(fallback, i, 0);
+      continue;
+    }
+
+    let currentRooms = ai.rooms;
+    const layoutStyle = ai.layoutStyle || STYLES[i % STYLES.length];
+    const designTheme = ai.designTheme || THEMES[i % THEMES.length];
+    let bestLayout    = null;
+    let bestScore     = -1;
+
+    for (let attempt = 1; attempt <= MAX_FIX + 1; attempt++) {
+      // Apply all room-level fixers
+      const rooms = [...currentRooms];
+      resolveOverlaps(rooms, buildable);
+      trimOverlaps(rooms, buildable);
+      fillGaps(rooms, buildable);
+      enforceRoomHierarchy(rooms);
+      const fixedRooms = enforceRoomCounts(rooms, req, buildable);
+      resolveOverlaps(fixedRooms, buildable);
+      trimOverlaps(fixedRooms, buildable);
+      fillGaps(fixedRooms, buildable);
+      enforceRoomHierarchy(fixedRooms);
+
+      const aiData = { rooms: fixedRooms, designTheme, layoutStyle, description: ai.description || '' };
+      const layout = buildVariationFromAIRooms(plotData, prefs, buildable, aiData, i);
+      const score  = layout.validation?.score ?? 0;
+
+      if (score > bestScore) { bestScore = score; bestLayout = layout; }
+
+      if (score > 80) {
+        console.log(`  Plan ${i + 1}: score=${score} ✓ (attempt ${attempt})`);
+        break;
+      }
+
+      if (attempt <= MAX_FIX) {
+        const errors = layout.validation?.errors || [];
+        if (errors.length === 0) break;
+
+        console.log(`  Plan ${i + 1} attempt ${attempt}: score=${score} — fixing ${errors.length} error(s): ${errors.map(e => e.type).join(', ')}`);
+        const fixed = await geminiService.fixRoomPlacements(fixedRooms, errors, buildable.width, buildable.length, layoutStyle);
+        if (fixed && fixed.length > 0) {
+          currentRooms = fixed.map(r => ({ ...r, x: Math.max(0, r.x || 0), y: Math.max(0, r.y || 0) }));
+        } else {
+          break;
+        }
+      }
+    }
+
+    await onPlanReady(bestLayout, i, MAX_FIX);
+  }
+}
+
 // ─── Rule-based fallback: always produces valid layouts ───────────────────────
 
 function generateFallbackLayouts(plotData, prefs, buildable, req, count) {
@@ -905,6 +986,7 @@ function buildDimensions(plotData) {
 module.exports = {
   generateLayout,
   generateLayoutVariations,
+  generateLayoutVariationsStream,
   MIN_ROOM_SIZES: ROOM_MIN,
   ROOM_ADJACENCY_RULES: {},
   STANDARDS: { corridor_width: CORR_W, wall_thickness: 0.3, door_width: DOOR_W, parking_width: PARK_W, parking_length: PARK_L }
