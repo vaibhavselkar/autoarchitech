@@ -31,7 +31,9 @@ const UltimateHomePage = () => {
       floors: 2,
       basement: false,
       roof_terrace: true,
-      elevator: false
+      elevator: false,
+      staircase_type: 'dog-leg',     // dog-leg | straight | spiral
+      staircase_position: 'center',  // center | corner | side
     },
     // Room Requirements
     requirements: {
@@ -396,6 +398,38 @@ const UltimateHomePage = () => {
                           />
                           <span className="text-sm">Elevator</span>
                         </label>
+                      </div>
+
+                      <div className="mt-4 space-y-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Staircase Type</label>
+                          <select
+                            value={formData.building.staircase_type}
+                            onChange={(e) => handleBuildingChange('staircase_type', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                          >
+                            <option value="dog-leg">Dog-leg (Standard)</option>
+                            <option value="straight">Straight Flight</option>
+                            <option value="spiral">Spiral / Circular</option>
+                          </select>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {formData.building.staircase_type === 'dog-leg' && 'Two flights with a landing — most common in Indian homes (≈10×5 ft)'}
+                            {formData.building.staircase_type === 'straight' && 'Single straight flight — compact but steeper (≈10×3.5 ft)'}
+                            {formData.building.staircase_type === 'spiral' && 'Space-saving circular staircase — ideal for tight corners (≈6×6 ft)'}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Staircase Position</label>
+                          <select
+                            value={formData.building.staircase_position}
+                            onChange={(e) => handleBuildingChange('staircase_position', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                          >
+                            <option value="center">Center (near entry)</option>
+                            <option value="corner">Corner (space saving)</option>
+                            <option value="side">Side wall</option>
+                          </select>
+                        </div>
                       </div>
                     </div>
                   )}

@@ -114,7 +114,14 @@ router.post('/generate', authMiddleware, async (req, res) => {
 
 // Stream floor plan generation — emits each plan via SSE as soon as score > 80
 router.post('/generate-stream', authMiddleware, async (req, res) => {
-  const { plot, requirements, preferences } = req.body;
+  const { plot, requirements, preferences, building } = req.body;
+
+  // Merge building config (floors, staircase) into requirements
+  if (building) {
+    requirements.floors            = building.floors            ?? requirements.floors;
+    requirements.staircase_type    = building.staircase_type    ?? requirements.staircase_type;
+    requirements.staircase_position= building.staircase_position?? requirements.staircase_position;
+  }
 
   if (!plot || !requirements) {
     return res.status(400).json({ success: false, message: 'Plot and requirements are required' });

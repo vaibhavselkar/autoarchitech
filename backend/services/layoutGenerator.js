@@ -55,6 +55,43 @@ const PARK_W  = 9;
 const PARK_L  = 18;
 const CORR_W  = 3.5;   // compact layout corridor width
 
+// ─── Staircase room builder ───────────────────────────────────────────────────
+
+/**
+ * Returns a staircase room object placed according to position preference.
+ * Dimensions depend on staircase type:
+ *   dog-leg  → 10 × 5 ft  (most common in Indian homes, requires landing)
+ *   straight → 10 × 3.5 ft (single flight, compact)
+ *   spiral   →  6 × 6 ft  (circular, tight corner)
+ *
+ * Position:
+ *   center → placed at horizontal center, just below the balcony/front zone
+ *   corner → placed at x=0 (left corner) at the service zone level
+ *   side   → placed at right edge at the service zone level
+ *
+ * The y coordinate is kept near the front third of the plan so the staircase
+ * is accessible from the entry without walking through private rooms.
+ */
+function _staircaseRoom(stType, stPos, W, H) {
+  const dims = {
+    'dog-leg':  { w: 10, h: 5 },
+    'straight': { w: 10, h: Math.round(3.5) },
+    'spiral':   { w:  6, h: 6 },
+  };
+  const { w, h } = dims[stType] || dims['dog-leg'];
+  const safeW = Math.min(w, Math.floor(W * 0.40));
+  const safeH = Math.min(h, Math.floor(H * 0.20));
+
+  // Place around the middle horizontal band (y ≈ 30-45% of buildable height)
+  const y = Math.round(H * 0.33);
+  let x;
+  if (stPos === 'corner') x = 0;
+  else if (stPos === 'side') x = W - safeW;
+  else x = Math.round((W - safeW) / 2); // center
+
+  return { type: 'staircase', x, y, width: safeW, height: safeH };
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 async function generateLayout(plot, requirements, preferences = {}) {
@@ -215,8 +252,9 @@ function _zoneHeights(total, zones) {
 }
 
 function buildSmartLinear(W, H, req) {
-  const beds  = clp(parseInt(req.bedrooms  || 2), 1, 6);
-  const baths = clp(parseInt(req.bathrooms || 2), 0, beds);
+  const beds      = clp(parseInt(req.bedrooms  || 2), 1, 6);
+  const baths     = clp(parseInt(req.bathrooms || 2), 0, beds);
+  const hasStairs = (req.floors || 1) > 1;
 
   const bathW       = clp(Math.round(W * 0.28), 6, 9);
   const bedW        = W - bathW;
@@ -262,6 +300,7 @@ function buildSmartLinear(W, H, req) {
   y += eachBedH;
 
   _placePrivateRows(rooms, W, y, H, regBeds, eachBedH, bathW, bedW, baths, baths >= 1 ? 1 : 0);
+  if (hasStairs) rooms.push(_staircaseRoom(req.staircase_type, req.staircase_position, W, H));
   return rooms;
 }
 
@@ -273,8 +312,9 @@ function buildSmartLinear(W, H, req) {
  * Falls back to linear if plot is too narrow for two viable columns.
  */
 function buildSmartPrivateWing(W, H, req) {
-  const beds  = clp(parseInt(req.bedrooms  || 2), 1, 6);
-  const baths = clp(parseInt(req.bathrooms || 2), 0, beds);
+  const beds      = clp(parseInt(req.bedrooms  || 2), 1, 6);
+  const baths     = clp(parseInt(req.bathrooms || 2), 0, beds);
+  const hasStairs = (req.floors || 1) > 1;
 
   const bathWP = 6;
   const minPrivW = 10 + bathWP;   // bed_w(10) + bath_w(6) = 16 ft minimum
@@ -328,6 +368,7 @@ function buildSmartPrivateWing(W, H, req) {
     }
   }
 
+  if (hasStairs) rooms.push(_staircaseRoom(req.staircase_type, req.staircase_position, W, H));
   return rooms;
 }
 
@@ -340,8 +381,9 @@ function buildSmartPrivateWing(W, H, req) {
  * Falls back to linear on tight plots.
  */
 function buildSmartServiceFront(W, H, req) {
-  const beds  = clp(parseInt(req.bedrooms  || 2), 1, 6);
-  const baths = clp(parseInt(req.bathrooms || 2), 0, beds);
+  const beds      = clp(parseInt(req.bedrooms  || 2), 1, 6);
+  const baths     = clp(parseInt(req.bathrooms || 2), 0, beds);
+  const hasStairs = (req.floors || 1) > 1;
 
   const bathW = clp(Math.round(W * 0.28), 6, 9);
   const bedW  = W - bathW;
@@ -425,6 +467,7 @@ function buildSmartServiceFront(W, H, req) {
     y += rowH;
   }
 
+  if (hasStairs) rooms.push(_staircaseRoom(req.staircase_type, req.staircase_position, W, H));
   return rooms;
 }
 
@@ -503,17 +546,51 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
     }
   }
 
-  // ── Step 2: Execute each plan using the smart builder for that style ────────
-  const generator = process.env.GEMINI_API_KEY ? 'gemini-recommended' : 'rule-based';
-  const usedStyles = new Set(); // track used styles for variety on fallback
+  // ── Guarantee each plan uses a DIFFERENT visual builder ────────────────────
+  // Even if Gemini recommends same style for multiple plans, force distinct styles
+  // so the 3 plans are always visually different.
+  {
+    const allStyles  = ['linear', 'private-wing', 'service-front'];
+    const seenStyles = new Set();
+    const unused     = () => allStyles.find(s => !seenStyles.has(s));
+
+    configs = configs.map(c => {
+      const s = allStyles.includes(c.style) ? c.style : allStyles[0];
+      if (!seenStyles.has(s)) {
+        seenStyles.add(s);
+        return { ...c, style: s };
+      }
+      // Duplicate — replace with next unused style
+      const replacement = unused();
+      if (replacement) seenStyles.add(replacement);
+      return { ...c, style: replacement || s };
+    });
+    console.log('  Assigned styles:', configs.map(c => c.style).join(', '));
+  }
+
+  // ── Pre-score every builder once so recovery can pick intelligently ─────────
+  const styleScores = {};
+  for (const s of ['linear', 'private-wing', 'service-front']) {
+    try {
+      const r = BUILDERS[s]();
+      resolveOverlaps(r, buildable);
+      const l = buildVariationFromAIRooms(plotData, prefs, buildable,
+        { rooms: r, designTheme: s, layoutStyle: s, description: s }, 0);
+      styleScores[s] = l.validation?.score ?? 0;
+    } catch { styleScores[s] = 0; }
+  }
+  console.log('  Style scores:', JSON.stringify(styleScores));
+
+  // ── Step 2: Execute each plan using its assigned builder ────────────────────
+  const generator   = process.env.GEMINI_API_KEY ? 'gemini-recommended' : 'rule-based';
+  const assignedStyles = configs.map(c => c.style); // locked-in style per plan
 
   const n = Math.min(count, configs.length);
   for (let i = 0; i < n; i++) {
-    const cfg = configs[i];
-    let style    = cfg.style in BUILDERS ? cfg.style : 'linear';
-    let builderFn = BUILDERS[style];
+    const cfg   = configs[i];
+    const style = cfg.style; // guaranteed unique across plans
 
-    let rooms = builderFn();
+    let rooms = BUILDERS[style]();
     resolveOverlaps(rooms, buildable);
 
     let layout = buildVariationFromAIRooms(plotData, prefs, buildable, {
@@ -523,26 +600,30 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
       description: cfg.planName || `${req.bedrooms}BHK ${style} plan`,
     }, i);
 
-    // ── Smart recovery: if score < 70, try remaining styles to find a better fit ──
-    // This handles plots that are too compact for horizontal band layouts.
-    if ((layout.validation?.score ?? 0) < 70) {
-      const fallbackOrder = ['private-wing', 'linear', 'service-front'].filter(s => s !== style);
-      for (const fallback of fallbackOrder) {
-        const fbRooms = BUILDERS[fallback]();
+    // ── Recovery: only if score < 60 AND the replacement style is not already
+    //   assigned to another plan (preserves visual diversity).
+    if ((layout.validation?.score ?? 0) < 60) {
+      // Find best-scoring unused style
+      const candidates = ['private-wing', 'linear', 'service-front']
+        .filter(s => s !== style && !assignedStyles.slice(0, i).includes(s) && !assignedStyles.slice(i + 1).includes(s));
+      let bestStyle = style, bestScore = layout.validation?.score ?? 0, bestLayout = layout;
+      for (const candidate of candidates) {
+        const fbRooms = BUILDERS[candidate]();
         resolveOverlaps(fbRooms, buildable);
         const fbLayout = buildVariationFromAIRooms(plotData, prefs, buildable, {
           rooms: fbRooms,
-          designTheme: cfg.theme || fallback,
-          layoutStyle: fallback,
-          description: cfg.planName || `${req.bedrooms}BHK ${fallback}`,
+          designTheme: cfg.theme || candidate,
+          layoutStyle: candidate,
+          description: cfg.planName || `${req.bedrooms}BHK ${candidate}`,
         }, i);
-        if ((fbLayout.validation?.score ?? 0) > (layout.validation?.score ?? 0)) {
-          layout = fbLayout;
-          style  = fallback;
-          rooms  = fbRooms;
+        const fbScore = fbLayout.validation?.score ?? 0;
+        if (fbScore > bestScore) {
+          bestScore = fbScore; bestStyle = candidate;
+          bestLayout = fbLayout; rooms = fbRooms;
         }
-        if ((layout.validation?.score ?? 0) >= 80) break;
+        if (bestScore >= 75) break;
       }
+      layout = bestLayout;
     }
 
     // Overlay Gemini's design intelligence onto the smart-built layout
@@ -561,7 +642,6 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
     const score = layout.validation?.score ?? 0;
     console.log(`  Plan ${i + 1} (${style}): "${cfg.planName || cfg.theme}" score=${score}`);
     await onPlanReady(layout, i, 0);
-    usedStyles.add(style);
   }
 }
 
@@ -1044,16 +1124,19 @@ function parsePlot(plot) {
 
 function parseRequirements(req) {
   return {
-    bedrooms:     parseInt(req.bedrooms     ?? req.numBedrooms  ?? 2),
-    bathrooms:    parseInt(req.bathrooms    ?? req.numBathrooms ?? 2),
-    living_room:  req.living_room  !== false ? 1 : 0,
-    dining:       req.dining       !== false ? 1 : 0,
-    kitchen:      req.kitchen      !== false ? 1 : 0,
-    balcony:      req.balcony      !== false ? 1 : 0,
-    study:        parseInt(req.study        ?? 0),
-    prayer_room:  req.prayer_room  ? 1 : 0,
-    guest_room:   parseInt(req.guest_room   ?? 0),
-    utility_room: parseInt(req.utility_room ?? 0),
+    bedrooms:           parseInt(req.bedrooms     ?? req.numBedrooms  ?? 2),
+    bathrooms:          parseInt(req.bathrooms    ?? req.numBathrooms ?? 2),
+    living_room:        req.living_room  !== false ? 1 : 0,
+    dining:             req.dining       !== false ? 1 : 0,
+    kitchen:            req.kitchen      !== false ? 1 : 0,
+    balcony:            req.balcony      !== false ? 1 : 0,
+    study:              parseInt(req.study        ?? 0),
+    prayer_room:        req.prayer_room  ? 1 : 0,
+    guest_room:         parseInt(req.guest_room   ?? 0),
+    utility_room:       parseInt(req.utility_room ?? 0),
+    floors:             parseInt(req.floors       ?? 1),
+    staircase_type:     req.staircase_type     || 'dog-leg',   // dog-leg | straight | spiral
+    staircase_position: req.staircase_position || 'center',    // center | corner | side
   };
 }
 
