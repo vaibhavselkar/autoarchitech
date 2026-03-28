@@ -161,8 +161,8 @@ function ArchitectView({ plan, onClose }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
               <tbody>
                 {[
-                  { label: 'Front (Road side)', value: sb.back, note: 'Min. required varies by road width' },
-                  { label: 'Rear (Garden side)', value: sb.front, note: 'Utility / service access' },
+                  { label: 'Front (Road side)', value: sb.front, note: 'Min. required varies by road width' },
+                  { label: 'Rear (Garden side)', value: sb.back, note: 'Utility / service access' },
                   { label: 'Left side', value: sb.left, note: 'Shared boundary buffer' },
                   { label: 'Right side', value: sb.right, note: 'Shared boundary buffer' },
                 ].map(({ label, value, note }) => (

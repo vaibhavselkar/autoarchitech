@@ -129,9 +129,9 @@ export default function SVGFloorPlan({ layout }) {
   const px = v => ox + v * scale;
   const py = v => oy + v * scale;
 
-  // Buildable area corners
-  const bx1 = px(sb.left), by1 = py(sb.back);
-  const bx2 = px(plot.width - sb.right), by2 = py(plot.length - sb.front);
+  // Buildable area corners (y=0 is road/front, so front setback is at the top)
+  const bx1 = px(sb.left), by1 = py(sb.front);
+  const bx2 = px(plot.width - sb.right), by2 = py(plot.length - sb.back);
   const bW  = bx2 - bx1, bH = by2 - by1;
 
   // Wall thickness in pixels (thinner at smaller scales)
@@ -226,11 +226,11 @@ export default function SVGFloorPlan({ layout }) {
           {/* Setback zone labels — small, muted */}
           <text x={ox + plotPW / 2} y={oy + 10} textAnchor="middle"
             fontSize="7.5" fill="#b0a070" fontFamily="monospace">
-            FRONT SETBACK — {sb.back}ft
+            FRONT SETBACK — {sb.front}ft
           </text>
           <text x={ox + plotPW / 2} y={oy + plotPH - 4} textAnchor="middle"
             fontSize="7.5" fill="#b0a070" fontFamily="monospace">
-            REAR SETBACK — {sb.front}ft
+            REAR SETBACK — {sb.back}ft
           </text>
           <text x={ox + 7} y={oy + plotPH / 2} fontSize="7" fill="#b0a070" fontFamily="monospace"
             transform={`rotate(-90,${ox + 7},${oy + plotPH / 2})`}>SIDE {sb.left}ft</text>

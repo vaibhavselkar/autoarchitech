@@ -154,9 +154,9 @@ export default function ProfessionalFloorPlan({
     const sb     = plot.setback || { front: 6, back: 4, left: 4, right: 4 };
 
     const bldLeft   = ftPx(sb.left);
-    const bldTop    = ftPx(sb.back);
+    const bldTop    = ftPx(sb.front);
     const bldRight  = ftPx(plot.width - sb.right);
-    const bldBottom = ftPx(plot.length - sb.front);
+    const bldBottom = ftPx(plot.length - sb.back);
     const bldW      = bldRight - bldLeft;
     const bldH      = bldBottom - bldTop;
 
@@ -365,10 +365,10 @@ export default function ProfessionalFloorPlan({
     ])].map(v => ox + v).sort((a, b) => a - b);
 
     const yPts = [...new Set([
-      ftPx(sb.back),
+      ftPx(sb.front),
       ...rooms.map(r => ftPx(r.y)),
       ...rooms.map(r => ftPx(r.y + r.height)),
-      ftPx(plot.length - sb.front),
+      ftPx(plot.length - sb.back),
     ])].map(v => oy + v).sort((a, b) => a - b);
 
     // Real mm between consecutive points
@@ -394,8 +394,8 @@ export default function ProfessionalFloorPlan({
         x2={ox + ftPx(plot.width - sb.right)} y2={oy}
         realMm={feetToMm(bW)} offset={38} axis="h" color="#222" />,
       <OverallDimension key="v-overall"
-        x1={ox} y1={oy + ftPx(sb.back)}
-        x2={ox} y2={oy + ftPx(plot.length - sb.front)}
+        x1={ox} y1={oy + ftPx(sb.front)}
+        x2={ox} y2={oy + ftPx(plot.length - sb.back)}
         realMm={feetToMm(bL)} offset={38} axis="v" color="#222" />,
     );
 
@@ -420,9 +420,9 @@ export default function ProfessionalFloorPlan({
   // ── Building boundary (buildable area outline) ────────────────────────────
   const bldBorder = (
     <rect
-      x={ox + ftPx(sb.left)} y={oy + ftPx(sb.back)}
+      x={ox + ftPx(sb.left)} y={oy + ftPx(sb.front)}
       width={ftPx(plot.width - sb.left - sb.right)}
-      height={ftPx(plot.length - sb.back - sb.front)}
+      height={ftPx(plot.length - sb.front - sb.back)}
       fill="none" stroke="#2563EB" strokeWidth={1} strokeDasharray="4,2"
     />
   );
