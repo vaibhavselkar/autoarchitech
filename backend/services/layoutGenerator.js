@@ -688,50 +688,38 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
       description: cfg.planName || `${req.bedrooms}BHK ${style} plan`,
     }, i);
 
-    // ── D2: Recovery — if score < 80, try every smart builder and keep the best ──
+    // ── D2: If Gemini output scored < 80, fall back to THIS plan's assigned smart builder.
+    //       NEVER swap to another plan's style — that causes all 3 plans to look identical.
     if ((layout.validation?.score ?? 0) < 80) {
-      // Always try ALL three builders — pick globally best, regardless of assigned style
-      const allBuilderKeys = ['private-wing', 'linear', 'service-front'];
-      let bestScore = layout.validation?.score ?? 0;
-      let bestLayout = layout;
-      let bestSource = aiSource;
-
-      for (const candidate of allBuilderKeys) {
-        const fbRooms = BUILDERS[candidate]();
-        resolveOverlaps(fbRooms, buildable);
-        trimOverlaps(fbRooms, buildable);
-        fillGaps(fbRooms, buildable);
-        const fbLayout = buildVariationFromAIRooms(plotData, prefs, buildable, {
-          rooms: fbRooms,
-          designTheme: cfg.theme || candidate,
-          layoutStyle: candidate,
-          description: cfg.planName || `${req.bedrooms}BHK ${candidate}`,
-        }, i);
-        const fbScore = fbLayout.validation?.score ?? 0;
-        if (fbScore > bestScore) {
-          bestScore  = fbScore;
-          bestLayout = fbLayout;
-          bestSource = `smart-builder-recovery(${candidate})`;
-        }
-        if (bestScore >= 80) break;
+      const smartRooms = BUILDERS[style]();
+      resolveOverlaps(smartRooms, buildable);
+      trimOverlaps(smartRooms, buildable);
+      fillGaps(smartRooms, buildable);
+      const smartLayout = buildVariationFromAIRooms(plotData, prefs, buildable, {
+        rooms:       smartRooms,
+        designTheme: cfg.theme || style,
+        layoutStyle: style,
+        description: cfg.planName || `${req.bedrooms}BHK ${style}`,
+      }, i);
+      // Use smart builder if it scores better (it almost always does over bad Gemini output)
+      if ((smartLayout.validation?.score ?? 0) >= (layout.validation?.score ?? 0)) {
+        layout   = smartLayout;
+        aiSource = `smart-builder(${style})`;
       }
+    }
 
-      layout   = bestLayout;
-      aiSource = bestSource;
-
-      // ── D3: autoFix pass — squeeze out last points if still below 80 ──
-      if ((layout.validation?.score ?? 0) < 80) {
-        const errs = layout.validation?.errors || [];
-        if (errs.length > 0) {
-          const fixed = autoFix(layout, errs);
-          if (fixed) {
-            const fixedValidation = validatePlan(fixed.plan);
-            if (fixedValidation.score > (layout.validation?.score ?? 0)) {
-              layout.rooms      = fixed.plan.rooms;
-              layout.validation = fixedValidation;
-              aiSource += '+autofix';
-              console.log(`  Plan ${i + 1}: autoFix boosted score to ${fixedValidation.score}`);
-            }
+    // ── D3: autoFix pass — last-resort boost if still below 80 ──
+    if ((layout.validation?.score ?? 0) < 80) {
+      const errs = layout.validation?.errors || [];
+      if (errs.length > 0) {
+        const fixed = autoFix(layout, errs);
+        if (fixed) {
+          const fixedValidation = validatePlan(fixed.plan);
+          if (fixedValidation.score > (layout.validation?.score ?? 0)) {
+            layout.rooms      = fixed.plan.rooms;
+            layout.validation = fixedValidation;
+            aiSource += '+autofix';
+            console.log(`  Plan ${i + 1}: autoFix boosted score to ${fixedValidation.score}`);
           }
         }
       }

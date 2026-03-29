@@ -8,6 +8,7 @@
 
 const { GoogleGenerativeAI }         = require('@google/generative-ai');
 const { buildFewShotSection }        = require('./examplePlans');
+const { buildRulebookPrompt }        = require('../knowledge/RULEBOOK');
 
 const SYSTEM_PROMPT = `
 You are a licensed civil engineer and architect with 25 years of experience
@@ -35,23 +36,7 @@ No markdown. No explanation outside the JSON.
 No code blocks. Pure JSON starting with { and ending with }.
 `.trim();
 
-// Minimum dimensions every room must meet — injected into the prompt
-const ROOM_MINIMUMS = `
-MANDATORY MINIMUM SIZES (never go below these):
-  living_room:     minH: 12,  minW: 12
-  master_bedroom:  minH: 12,  minW: 12
-  bedroom:         minH: 10,  minW: 10
-  kitchen:         minH: 10,  minW: 8
-  dining:          minH: 10,  minW: 10
-  bathroom:        minH: 7,   minW: 5
-  balcony:         minH: 5,   minW: 8
-  parking:         minH: 18,  minW: 9
-  corridor:        minH: 4,   minW: 3
-  entry:           minH: 4,   minW: 4
-
-You MUST output minH and minW for EVERY room.
-The layout engine uses these values directly to set room sizes.
-Never output a room with minH or minW below these values.`.trim();
+// Rules are now loaded from RULEBOOK.js — single source of truth
 
 function buildPrompt(params) {
   const {
@@ -97,22 +82,15 @@ REQUIREMENTS:
 - Must include: living_room, kitchen, dining, balcony
 - Must include: parking (placed outside buildable area at y < 0 or beside it — use y=0 as gate line)
 
-${ROOM_MINIMUMS}
+${buildRulebookPrompt()}
 
 COORDINATE RULES:
 - Every room's x must be: 0 ≤ x ≤ ${buildableW} - width
 - Every room's y must be: 0 ≤ y ≤ ${buildableH} - height
 - Rooms must NOT overlap each other
-- All rooms together should cover most of the ${buildableW}×${buildableH}ft buildable area
+- All rooms together must FULLY cover the ${buildableW}×${buildableH}ft buildable area (zero gaps)
 - Parking is placed at y=-(parking_height) (in front of buildable area near the gate)
-
-CRITICAL DESIGN RULES:
-- Bathroom must NEVER be directly adjacent to kitchen (no shared wall)
-- Kitchen must be adjacent to dining (shared wall)
-- Master bedroom must be at the rear (high y values, away from road)
-- Balcony must be at the front (low y values, near road)
-- Every bedroom must have an exterior wall for a window
-- Kitchen: platformWall and windowWall are the same; doorWall is the opposite wall
+- Kitchen: platformWall and windowWall are the same wall; doorWall is the OPPOSITE wall
 
 Return ONLY this JSON (no markdown, no explanation, no code blocks):
 
