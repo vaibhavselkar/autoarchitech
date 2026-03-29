@@ -500,28 +500,27 @@ function buildOpenSocialHub(W, H, req) {
   const balcH = clp(Math.round(H * 0.09), MIN_BALC, 7);
   rooms.push({ type: 'balcony', x: 0, y: 0, width: W, height: balcH });
 
-  // ── Bedroom zone: 2 beds per row (like _placePrivateRows) → fewer rows ──
-  // Row count: ceil(beds/2) so 3 beds = 2 rows, 4 beds = 2 rows, 5 = 3 rows
+  // ── Zone heights: _zoneHeights guarantees both minimums ──────────────
+  // Bedroom zone: ceil(beds/2) rows, each ≥ MIN_BED
+  // Social zone: living(≥10) + dining(≥10) stacked in left column
   const bedRowCount = Math.ceil(beds / 2);
   const minBedZoneH = bedRowCount * MIN_BED;
-
-  // ── Social zone: must fit living (≥10) + dining (≥10) + kitchen (≥8) ──
-  const minSocialH  = MIN_LIV + MIN_DIN;   // kitchen is in a side column, not vertical
+  const minSocialH  = MIN_LIV + MIN_DIN;   // kitchen is in a side column
   const availH      = H - balcH;
-  // Guarantee both zones meet their minimums; give beds exactly what they need,
-  // then give the rest to social zone
-  const bedZoneH    = Math.max(minBedZoneH, Math.round(availH * 0.50));
-  const socialH     = Math.max(minSocialH,  availH - bedZoneH);
-  // Re-clamp bed zone so total = availH
-  const actualBedH  = availH - socialH;
-  const eachBedH    = Math.max(MIN_BED, Math.floor(actualBedH / bedRowCount));
 
-  // Social zone: living (LEFT column) + dining stacked, kitchen RIGHT column
+  const [socialH, actualBedH] = _zoneHeights(availH, [
+    { min: minSocialH,  shares: 1.2 },
+    { min: minBedZoneH, shares: 1.0 * bedRowCount },
+  ]);
+
+  // Social zone columns
   const socialW = r2(W * 0.62);
   const kitW    = W - socialW;
+  // Kitchen spans the full social zone height in the RIGHT column
+  const kitH    = socialH;
+  // Living + dining stacked in LEFT column
   const livH    = Math.max(MIN_LIV, Math.round(socialH * 0.55));
-  const dinH    = socialH - livH;   // dining = rest — guaranteed ≥ MIN_DIN because socialH ≥ minSocialH
-  const kitH    = Math.max(MIN_KIT, socialH);  // kitchen spans full social height (RIGHT column)
+  const dinH    = socialH - livH;   // ≥ MIN_DIN because socialH ≥ MIN_LIV+MIN_DIN
 
   rooms.push({ type: 'living_room', x: 0,       y: balcH,        width: socialW, height: livH  });
   rooms.push({ type: 'dining',      x: 0,       y: balcH + livH, width: socialW, height: dinH  });
@@ -529,13 +528,17 @@ function buildOpenSocialHub(W, H, req) {
 
   // ── Rear: 2 beds per row ──────────────────────────────────────────────
   const bedStartY = balcH + socialH;
+  const eachBedH  = Math.floor(actualBedH / bedRowCount);
   const bathW     = clp(Math.round(W * 0.20), 6, 9);
   let   bathIdx   = 0;
   let   bedsLeft  = beds;
 
   for (let row = 0; row < bedRowCount; row++) {
     const bedsThisRow = Math.min(2, bedsLeft);
-    const rowH   = row === bedRowCount - 1 ? Math.max(MIN_BED, H - bedStartY - row * eachBedH) : eachBedH;
+    // Last row takes all remaining height (prevents gap or overflow)
+    const rowH   = row === bedRowCount - 1
+      ? Math.max(MIN_BED, actualBedH - row * eachBedH)
+      : Math.max(MIN_BED, eachBedH);
     const yRow   = bedStartY + row * eachBedH;
     const hasBath = bathIdx < baths;
 
