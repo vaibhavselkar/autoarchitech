@@ -829,31 +829,54 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
   if (process.env.GEMINI_API_KEY) {
     try {
       const userParams = {
+        // Plot
         plotWidth:  plotData.width,
         plotHeight: plotData.length,
-        facing:     plotData.facing || 'North',
-        bedrooms:   req.bedrooms,
-        bathrooms:  req.bathrooms,
+        facing:     plotData.facing || 'north',
         city:       preferences.city || 'Central India',
         setbacks: {
-          front: plotData.setback?.front || 3,
-          rear:  plotData.setback?.back  || 3,
-          left:  plotData.setback?.left  || 2,
-          right: plotData.setback?.right || 2,
+          front: plotData.setback?.front || 6,
+          rear:  plotData.setback?.back  || 4,
+          left:  plotData.setback?.left  || 4,
+          right: plotData.setback?.right || 4,
         },
+        // Rooms
+        bedrooms:      req.bedrooms,
+        bathrooms:     req.bathrooms,
+        study:         req.study         || 0,
+        prayer_room:   req.prayer_room   || false,
+        guest_room:    req.guest_room    || 0,
+        utility_room:  req.utility_room  || 0,
+        // Building
+        floors:            req.floors            || 1,
+        staircase_type:    req.staircase_type    || 'dog-leg',
+        staircase_position:req.staircase_position|| 'center',
+        // Preferences
+        vastu:              prefs.vastu || false,
+        parking:            prefs.parking,
+        style:              prefs.style  || 'modern',
+        budget:             preferences.budget || 'medium',
+        special_features:   preferences.special_features || [],
+        earthquake_resistant: preferences.earthquake_resistant || false,
+        energy_efficient:     preferences.energy_efficient    || false,
+        smart_home_ready:     preferences.smart_home_ready    || false,
+        customIdea:           prefs.customIdea || preferences.customIdea || '',
       };
       const recs = await getDesignRecommendations(userParams);
       if (recs?.plans?.length >= 3) {
         configs = recs.plans.map(p => ({
-          style:              p.style || 'linear',
-          theme:              p.theme || 'Modern Minimalist',
-          planName:           p.planName,
-          engineerThinking:   p.engineerThinking,
-          vastuCompliant:     p.vastuCompliant ?? false,
-          sunlightStrategy:   p.sunlightStrategy,
-          ventilationStrategy:p.ventilationStrategy,
+          style:               p.style || 'linear',
+          style_name:          p.style_name,
+          score:               p.score,
+          theme:               p.theme || 'Modern Minimalist',
+          planName:            p.planName,
+          engineerThinking:    p.engineerThinking,
+          vastuCompliant:      p.vastuCompliant ?? false,
+          sunlightStrategy:    p.sunlightStrategy,
+          ventilationStrategy: p.ventilationStrategy,
+          requirementNotes:    p.requirementNotes,
         }));
-        console.log('  Gemini provided recommendations:', configs.map(c => c.style).join(', '));
+        console.log('  Gemini recommendations:', configs.map(c => `${c.style}(${c.score})`).join(', '));
       }
     } catch (err) {
       console.warn('  Gemini design recommendations failed:', err.message, '— using defaults');
@@ -929,20 +952,39 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
       try {
         const sb = plotData.setback || {};
         const geminiPlan = await callGemini({
+          // Plot
           plotWidth:  plotData.width,
           plotHeight: plotData.length,
-          facing:     (plotData.facing || 'NORTH').toUpperCase(),
-          bedrooms:   req.bedrooms,
-          bathrooms:  req.bathrooms,
-          style:      cfg.theme || style,
-          priorities: ['natural light', 'privacy', 'ventilation'],
+          facing:     (plotData.facing || 'north').toUpperCase(),
+          city:       preferences.city || 'Central India',
           setbacks: {
             front: sb.front || 6,
             rear:  sb.back  || 4,
             left:  sb.left  || 4,
             right: sb.right || 4,
           },
-          city: preferences.city || 'Central India',
+          // Style for this specific plan
+          style: cfg.style_name || cfg.theme || style,
+          // All room requirements
+          bedrooms:      req.bedrooms,
+          bathrooms:     req.bathrooms,
+          study:         req.study         || 0,
+          prayer_room:   req.prayer_room   || false,
+          guest_room:    req.guest_room    || 0,
+          utility_room:  req.utility_room  || 0,
+          // Building config
+          floors:             req.floors             || 1,
+          staircase_type:     req.staircase_type     || 'dog-leg',
+          staircase_position: req.staircase_position || 'center',
+          // Preferences — every preference reaches Gemini
+          vastu:               prefs.vastu || false,
+          parking:             prefs.parking,
+          budget:              preferences.budget || 'medium',
+          special_features:    preferences.special_features || [],
+          earthquake_resistant:preferences.earthquake_resistant || false,
+          energy_efficient:    preferences.energy_efficient    || false,
+          smart_home_ready:    preferences.smart_home_ready    || false,
+          customIdea:          prefs.customIdea || preferences.customIdea || '',
         });
 
         // Gemini now returns x/y/width/height directly — no resolveLayout needed
