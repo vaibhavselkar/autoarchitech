@@ -57,6 +57,9 @@ const Home = () => {
       preferences: { ...preferences, customIdea: customIdea.trim() || undefined },
     };
 
+    // Persist params so Results page survives a refresh
+    sessionStorage.setItem('lastGenerationParams', JSON.stringify(payload));
+
     // Navigate immediately — PlanResults handles streaming
     navigate('/results', { state: { generationParams: payload } });
   };

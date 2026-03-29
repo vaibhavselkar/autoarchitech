@@ -261,7 +261,12 @@ export default function PlanResults() {
   useEffect(() => {
     const state = location.state;
 
-    if (state?.generationParams) {
+    // Recover params from sessionStorage if page was refreshed
+    const params = state?.generationParams ?? (() => {
+      try { return JSON.parse(sessionStorage.getItem('lastGenerationParams')); } catch { return null; }
+    })();
+
+    if (params) {
       // ── Streaming path ────────────────────────────────────────────────────
       setSlots([null, null, null]);
       setStreaming(true);
@@ -274,7 +279,7 @@ export default function PlanResults() {
           const response = await fetch(`${BASE_URL}/plans/generate-stream`, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body:    JSON.stringify(state.generationParams),
+            body:    JSON.stringify(params),
           });
 
           if (!response.ok) {
@@ -408,7 +413,15 @@ export default function PlanResults() {
             Plans {streaming && <span style={{ color: '#3b82f6', fontWeight: 400, textTransform: 'none' }}>— generating…</span>}
           </p>
           {!streaming && plans.length === 0
-            ? <p className="text-sm text-gray-400">No plans yet. Generate some first.</p>
+            ? <div>
+                <p className="text-sm text-gray-400 mb-3">No plans yet.</p>
+                <button
+                  onClick={() => navigate('/home')}
+                  className="text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  Generate Plans →
+                </button>
+              </div>
             : slots.map((plan, slotIndex) => {
                 if (!plan) return <PlanSkeleton key={slotIndex} index={slotIndex} />;
                 const meta     = plan.layoutJson?.metadata || {};
