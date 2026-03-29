@@ -2,196 +2,204 @@
 /**
  * examplePlans.js — Few-shot learning library for Gemini.
  *
- * These are hand-crafted, validator-verified example plans.
- * Each covers a different plot size, orientation, and BHK count.
- * Gemini reads these BEFORE designing a new plan and copies the pattern.
+ * Each example uses DIRECT x/y/width/height COORDINATES (feet, buildable-relative).
+ * Gemini copies this coordinate system when designing new plans.
+ *
+ * Coordinate system:
+ *   origin (0,0) = front-left corner of the buildable area
+ *   x grows RIGHT, y grows DOWN (away from road)
+ *   y=0 = road side (front), y=buildableH = rear/garden side
  *
  * Rules verified in every example:
- *   ✓ No bathroom shares a wall with kitchen (different band OR column)
- *   ✓ Kitchen platformWall ≠ doorWall
- *   ✓ Every bedroom has a windowWall
- *   ✓ Bathroom sizeWeight always 1, living always 5
- *   ✓ minH and minW specified for every room
- *   ✓ Master bedroom always in band 3
- *   ✓ Parking always in band 1
+ *   ✓ No bathroom shares a wall with kitchen
+ *   ✓ Kitchen adjacent to dining (shared wall)
+ *   ✓ Balcony at front (y near 0)
+ *   ✓ Master bedroom at rear (y large)
+ *   ✓ All rooms within buildable bounds
+ *   ✓ No overlaps
+ *   ✓ Rooms cover most of the buildable area
  */
 
 const EXAMPLE_PLANS = [
 
-  // ── EXAMPLE 1: 40×35ft, North-facing, 3BHK ──────────────────────────────
+  // ── EXAMPLE 1: 40×60ft plot, North-facing, 3BHK ─────────────────────────
+  // Buildable: 32×50ft (setbacks L4 R4 F6 B4)
   {
     input: {
-      plotWidth: 40, plotHeight: 35, facing: 'NORTH',
-      bedrooms: 3, bathrooms: 2, style: 'Modern Indian',
+      plotWidth: 40, plotHeight: 60, facing: 'NORTH',
+      bedrooms: 3, bathrooms: 2,
+      buildableW: 32, buildableH: 50,
     },
     output: {
       planName: 'North-facing 3BHK Linear',
       layoutType: 'linear',
-      engineerThinking: 'Road is on the north. Parking and balcony face the road for easy access. Living room in band 2 gets afternoon light from the west. Kitchen placed at rear-right for privacy and ventilation. Both bathrooms are in band 3 flanking bedrooms — never touching the kitchen which is band 2.',
+      engineerThinking: 'Road on north. Balcony at y=0 faces road for visibility. Living room spans full width in the middle band to maximise space. Kitchen placed at rear-right with east window for morning light. Both bathrooms serve bedrooms in the rear band — no bathroom touches kitchen.',
       vastuCompliant: false,
-      sunlightStrategy: 'Living room on west side of band 2 gets afternoon sun. Bedrooms on south wall get winter sun.',
-      ventilationStrategy: 'Kitchen on east wall has cross-ventilation with west-facing living room.',
+      sunlightStrategy: 'East-facing kitchen and west-facing living room create morning and afternoon light balance.',
+      ventilationStrategy: 'Full-width living room allows north-south cross-ventilation. Kitchen exhaust goes east.',
       rooms: [
-        { id: 'parking', label: 'Parking',        type: 'parking',        band: 1, col: 1, colSpan: 1, sizeWeight: 2, doorWall: 'north', windowWall: 'none',  platformWall: 'none',  minW: 9,  minH: 18 },
-        { id: 'balcony', label: 'Balcony',         type: 'balcony',        band: 1, col: 2, colSpan: 2, sizeWeight: 5, doorWall: 'south', windowWall: 'north', platformWall: 'none',  minW: 10, minH: 5  },
-        { id: 'living',  label: 'Living Room',     type: 'living',         band: 2, col: 1, colSpan: 2, sizeWeight: 5, doorWall: 'east',  windowWall: 'west',  platformWall: 'none',  minW: 12, minH: 12 },
-        { id: 'dining',  label: 'Dining Room',     type: 'dining',         band: 2, col: 2, colSpan: 1, sizeWeight: 3, doorWall: 'south', windowWall: 'north', platformWall: 'none',  minW: 10, minH: 10 },
-        { id: 'kitchen', label: 'Kitchen',         type: 'kitchen',        band: 2, col: 3, colSpan: 1, sizeWeight: 3, doorWall: 'west',  windowWall: 'east',  platformWall: 'east',  minW: 8,  minH: 10 },
-        { id: 'mbed',    label: 'Master Bedroom',  type: 'master_bedroom', band: 3, col: 1, colSpan: 2, sizeWeight: 5, doorWall: 'north', windowWall: 'south', platformWall: 'none',  minW: 12, minH: 12 },
-        { id: 'bed2',    label: 'Bedroom 2',       type: 'bedroom',        band: 3, col: 2, colSpan: 1, sizeWeight: 4, doorWall: 'north', windowWall: 'south', platformWall: 'none',  minW: 10, minH: 10 },
-        { id: 'bath1',   label: 'Bathroom 1',      type: 'bathroom',       band: 3, col: 3, colSpan: 1, sizeWeight: 1, doorWall: 'west',  windowWall: 'none',  platformWall: 'none',  minW: 5,  minH: 7  },
-        { id: 'bed3',    label: 'Bedroom 3',       type: 'bedroom',        band: 3, col: 3, colSpan: 1, sizeWeight: 4, doorWall: 'north', windowWall: 'east',  platformWall: 'none',  minW: 10, minH: 10 },
-        { id: 'bath2',   label: 'Bathroom 2',      type: 'bathroom',       band: 3, col: 1, colSpan: 1, sizeWeight: 1, doorWall: 'east',  windowWall: 'none',  platformWall: 'none',  minW: 5,  minH: 7  },
+        { type: 'balcony',        label: 'Balcony',        x: 0,  y: 0,  width: 32, height: 5  },
+        { type: 'living_room',    label: 'Living Room',    x: 0,  y: 5,  width: 32, height: 14 },
+        { type: 'dining',         label: 'Dining Room',    x: 0,  y: 19, width: 16, height: 11 },
+        { type: 'kitchen',        label: 'Kitchen',        x: 16, y: 19, width: 16, height: 11, windowWall: 'east', doorWall: 'west', platformWall: 'east' },
+        { type: 'master_bedroom', label: 'Master Bedroom', x: 0,  y: 30, width: 20, height: 13 },
+        { type: 'bathroom',       label: 'Bathroom 1',     x: 20, y: 30, width: 7,  height: 13 },
+        { type: 'bedroom',        label: 'Bedroom 2',      x: 0,  y: 43, width: 16, height: 7  },
+        { type: 'bedroom',        label: 'Bedroom 3',      x: 16, y: 43, width: 9,  height: 7  },
+        { type: 'bathroom',       label: 'Bathroom 2',     x: 25, y: 43, width: 7,  height: 7  },
       ],
       _notes: [
-        'bath1 is col:3 band:3 — adjacent to bed2/bed3, NOT touching kitchen which is col:3 band:2 (different band = different physical wall)',
-        'bath2 is col:1 band:3 — adjacent to master bedroom, far from kitchen col:3',
-        'kitchen platformWall=east, doorWall=west — opposite walls enforced',
-        'parking col:1 band:1 — closest to road gate on the left',
-        'master bedroom always band:3 — furthest from road noise',
+        'Total height: 5+14+11+13+7 = 50ft = buildableH ✓',
+        'Total width: 32ft = buildableW ✓',
+        'Bathroom 1 at x=20-27, y=30-43 — Kitchen at x=16-32, y=19-30 — NO shared wall (different y range)',
+        'Bathroom 2 at x=25-32, y=43-50 — Kitchen at x=16-32, y=19-30 — NO shared wall (different y range)',
+        'Kitchen doorWall=west, platformWall=east — opposite walls ✓',
+        'Balcony at y=0 (front), master bedroom at y=30 (rear) ✓',
       ],
     },
   },
 
-  // ── EXAMPLE 2: 30×40ft, East-facing, 2BHK, Vastu ────────────────────────
+  // ── EXAMPLE 2: 30×50ft plot, East-facing, 2BHK, Vastu ───────────────────
+  // Buildable: 22×42ft (setbacks L4 R4 F4 B4)
   {
     input: {
-      plotWidth: 30, plotHeight: 40, facing: 'EAST',
-      bedrooms: 2, bathrooms: 1, style: 'Vastu',
+      plotWidth: 30, plotHeight: 50, facing: 'EAST',
+      bedrooms: 2, bathrooms: 1,
+      buildableW: 22, buildableH: 42,
     },
     output: {
       planName: 'East-facing Vastu 2BHK',
       layoutType: 'vastu',
-      engineerThinking: 'Road is on the east. Entry and living room face east to receive morning light — auspicious in Vastu. Kitchen placed in SE quadrant (band 2, col 3) as Vastu requires fire element in SE. Master bedroom in SW (band 3, col 1) for stability. Bathroom in NW is acceptable per Vastu.',
+      engineerThinking: 'Road on east. Entry and balcony face east for morning sun — auspicious in Vastu. Kitchen in SE quadrant (right side near front) as Vastu fire zone. Master bedroom in SW (right side, rear) for stability. Single bathroom between both bedrooms, nowhere near kitchen.',
       vastuCompliant: true,
-      sunlightStrategy: 'Living room and balcony on east wall receive morning sun — optimal for Indian homes.',
-      ventilationStrategy: 'Kitchen on south wall, bedrooms on west — creates diagonal cross-ventilation.',
+      sunlightStrategy: 'Balcony on east wall gets morning sun. Kitchen on east-south corner uses morning light for cooking.',
+      ventilationStrategy: 'Balcony at front, bedrooms at rear — east-west airflow through living room.',
       rooms: [
-        { id: 'parking', label: 'Parking',        type: 'parking',        band: 1, col: 1, colSpan: 1, sizeWeight: 2, doorWall: 'east',  windowWall: 'none',  platformWall: 'none',  minW: 9,  minH: 18 },
-        { id: 'balcony', label: 'Balcony',         type: 'balcony',        band: 1, col: 2, colSpan: 2, sizeWeight: 4, doorWall: 'south', windowWall: 'east',  platformWall: 'none',  minW: 8,  minH: 5  },
-        { id: 'living',  label: 'Living Room',     type: 'living',         band: 2, col: 1, colSpan: 2, sizeWeight: 5, doorWall: 'south', windowWall: 'east',  platformWall: 'none',  minW: 12, minH: 12 },
-        { id: 'dining',  label: 'Dining Room',     type: 'dining',         band: 2, col: 2, colSpan: 1, sizeWeight: 3, doorWall: 'west',  windowWall: 'east',  platformWall: 'none',  minW: 10, minH: 10 },
-        { id: 'kitchen', label: 'Kitchen',         type: 'kitchen',        band: 2, col: 3, colSpan: 1, sizeWeight: 3, doorWall: 'north', windowWall: 'south', platformWall: 'south', minW: 8,  minH: 10 },
-        { id: 'mbed',    label: 'Master Bedroom',  type: 'master_bedroom', band: 3, col: 1, colSpan: 2, sizeWeight: 5, doorWall: 'east',  windowWall: 'west',  platformWall: 'none',  minW: 12, minH: 12 },
-        { id: 'bed2',    label: 'Bedroom 2',       type: 'bedroom',        band: 3, col: 2, colSpan: 1, sizeWeight: 4, doorWall: 'east',  windowWall: 'west',  platformWall: 'none',  minW: 10, minH: 10 },
-        { id: 'bath1',   label: 'Bathroom',        type: 'bathroom',       band: 3, col: 3, colSpan: 1, sizeWeight: 1, doorWall: 'west',  windowWall: 'none',  platformWall: 'none',  minW: 5,  minH: 7  },
+        { type: 'balcony',        label: 'Balcony',        x: 0,  y: 0,  width: 14, height: 5  },
+        { type: 'kitchen',        label: 'Kitchen',        x: 14, y: 0,  width: 8,  height: 10, windowWall: 'east', doorWall: 'south', platformWall: 'east' },
+        { type: 'living_room',    label: 'Living Room',    x: 0,  y: 5,  width: 14, height: 15 },
+        { type: 'dining',         label: 'Dining Room',    x: 14, y: 10, width: 8,  height: 10 },
+        { type: 'master_bedroom', label: 'Master Bedroom', x: 0,  y: 20, width: 14, height: 12 },
+        { type: 'bathroom',       label: 'Bathroom',       x: 14, y: 20, width: 8,  height: 10 },
+        { type: 'bedroom',        label: 'Bedroom 2',      x: 0,  y: 32, width: 22, height: 10 },
       ],
       _notes: [
-        'Vastu: kitchen is SE = col:3 band:2 on east-facing plot',
-        'Vastu: master bedroom is SW = col:1 band:3',
-        'bathroom col:3 band:3 — adjacent to bed2, NOT touching kitchen col:3 band:2 (DIFFERENT BAND = different wall)',
-        'kitchen platformWall=south — doorWall must be north (opposite side)',
+        'Total height: covers 0 to 42ft ✓',
+        'Kitchen at y=0-10. Bathroom at y=20-30. No shared wall (10ft gap) ✓',
+        'Kitchen doorWall=south (into dining), platformWall=east ✓',
+        'Vastu: kitchen east-front (SE on east-facing), master bedroom rear-left (SW) ✓',
+        'Balcony at y=0 (front, near road) ✓',
       ],
     },
   },
 
-  // ── EXAMPLE 3: 50×40ft, North-facing, 4BHK, Traditional ─────────────────
+  // ── EXAMPLE 3: 50×50ft plot, North-facing, 4BHK ─────────────────────────
+  // Buildable: 42×42ft (setbacks L4 R4 F4 B4)
   {
     input: {
-      plotWidth: 50, plotHeight: 40, facing: 'NORTH',
-      bedrooms: 4, bathrooms: 3, style: 'Traditional',
+      plotWidth: 50, plotHeight: 50, facing: 'NORTH',
+      bedrooms: 4, bathrooms: 3,
+      buildableW: 42, buildableH: 42,
     },
     output: {
-      planName: 'North-facing Traditional 4BHK',
+      planName: 'North-facing Split-Zone 4BHK',
       layoutType: 'split',
-      engineerThinking: 'Large plot allows split-zone layout. Left zone has public spaces, right zone has private bedrooms. Three bathrooms each adjacent to a bedroom and none touch kitchen. Kitchen at rear-right with service entry.',
+      engineerThinking: 'Large square plot allows a split-zone layout. Left column is the private bedroom wing; right column has public spaces. This separates road noise from the sleeping zone. Three bathrooms each directly serve a bedroom — none touch the kitchen on the right side.',
       vastuCompliant: false,
-      sunlightStrategy: 'All four bedrooms on south or west walls for afternoon light and privacy from road.',
-      ventilationStrategy: 'Central corridor acts as air shaft. Kitchen on rear wall has full cross-ventilation.',
+      sunlightStrategy: 'Right-side living room gets west afternoon sun. Left-side bedrooms get east morning light.',
+      ventilationStrategy: 'Left and right columns separated by a central corridor allow independent ventilation paths.',
       rooms: [
-        { id: 'parking', label: 'Parking',        type: 'parking',        band: 1, col: 1, colSpan: 1, sizeWeight: 2, doorWall: 'north', windowWall: 'none',  platformWall: 'none',  minW: 9,  minH: 18 },
-        { id: 'balcony', label: 'Balcony',         type: 'balcony',        band: 1, col: 2, colSpan: 2, sizeWeight: 6, doorWall: 'south', windowWall: 'north', platformWall: 'none',  minW: 12, minH: 5  },
-        { id: 'living',  label: 'Living Room',     type: 'living',         band: 2, col: 1, colSpan: 2, sizeWeight: 5, doorWall: 'east',  windowWall: 'west',  platformWall: 'none',  minW: 12, minH: 12 },
-        { id: 'dining',  label: 'Dining Room',     type: 'dining',         band: 2, col: 2, colSpan: 1, sizeWeight: 4, doorWall: 'south', windowWall: 'north', platformWall: 'none',  minW: 12, minH: 12 },
-        { id: 'kitchen', label: 'Kitchen',         type: 'kitchen',        band: 2, col: 3, colSpan: 1, sizeWeight: 3, doorWall: 'west',  windowWall: 'east',  platformWall: 'east',  minW: 8,  minH: 10 },
-        { id: 'bath1',   label: 'Bathroom 1',      type: 'bathroom',       band: 2, col: 1, colSpan: 1, sizeWeight: 1, doorWall: 'east',  windowWall: 'none',  platformWall: 'none',  minW: 5,  minH: 7  },
-        { id: 'mbed',    label: 'Master Bedroom',  type: 'master_bedroom', band: 3, col: 1, colSpan: 2, sizeWeight: 5, doorWall: 'north', windowWall: 'south', platformWall: 'none',  minW: 12, minH: 12 },
-        { id: 'bed2',    label: 'Bedroom 2',       type: 'bedroom',        band: 3, col: 2, colSpan: 1, sizeWeight: 4, doorWall: 'north', windowWall: 'south', platformWall: 'none',  minW: 10, minH: 10 },
-        { id: 'bath2',   label: 'Bathroom 2',      type: 'bathroom',       band: 3, col: 2, colSpan: 1, sizeWeight: 1, doorWall: 'west',  windowWall: 'south', platformWall: 'none',  minW: 5,  minH: 7  },
-        { id: 'bed3',    label: 'Bedroom 3',       type: 'bedroom',        band: 3, col: 3, colSpan: 1, sizeWeight: 4, doorWall: 'north', windowWall: 'east',  platformWall: 'none',  minW: 10, minH: 10 },
-        { id: 'bed4',    label: 'Bedroom 4',       type: 'bedroom',        band: 3, col: 3, colSpan: 1, sizeWeight: 4, doorWall: 'north', windowWall: 'east',  platformWall: 'none',  minW: 10, minH: 10 },
-        { id: 'bath3',   label: 'Bathroom 3',      type: 'bathroom',       band: 3, col: 3, colSpan: 1, sizeWeight: 1, doorWall: 'west',  windowWall: 'none',  platformWall: 'none',  minW: 5,  minH: 7  },
+        { type: 'balcony',        label: 'Balcony',        x: 0,  y: 0,  width: 42, height: 5  },
+        { type: 'living_room',    label: 'Living Room',    x: 22, y: 5,  width: 20, height: 14 },
+        { type: 'master_bedroom', label: 'Master Bedroom', x: 0,  y: 5,  width: 15, height: 14 },
+        { type: 'bathroom',       label: 'Master Bath',    x: 15, y: 5,  width: 7,  height: 14 },
+        { type: 'dining',         label: 'Dining Room',    x: 22, y: 19, width: 12, height: 11 },
+        { type: 'kitchen',        label: 'Kitchen',        x: 34, y: 19, width: 8,  height: 11, windowWall: 'east', doorWall: 'west', platformWall: 'east' },
+        { type: 'bedroom',        label: 'Bedroom 2',      x: 0,  y: 19, width: 14, height: 11 },
+        { type: 'bathroom',       label: 'Bathroom 2',     x: 14, y: 19, width: 8,  height: 11 },
+        { type: 'bedroom',        label: 'Bedroom 3',      x: 0,  y: 30, width: 14, height: 12 },
+        { type: 'bedroom',        label: 'Bedroom 4',      x: 14, y: 30, width: 14, height: 12 },
+        { type: 'bathroom',       label: 'Bathroom 3',     x: 28, y: 30, width: 14, height: 12 },
       ],
       _notes: [
-        'bath1 in band:2 col:1 — next to living room, far from kitchen col:3',
-        'bath2 in band:3 col:2 — between bed2 and master bedroom',
-        'bath3 in band:3 col:3 — adjacent to bed3 and bed4',
-        'NONE of the 3 bathrooms share a band+column with kitchen — verified',
-        'kitchen is col:3 band:2; all bathrooms in band:3 or different column',
+        'Kitchen at x=34-42, y=19-30. All bathrooms: x=15-22 y=5-19, x=14-22 y=19-30, x=28-42 y=30-42',
+        'Bathroom 3 at x=28-42, y=30-42. Kitchen at x=34-42, y=19-30. Shared x range BUT different y — no shared wall ✓',
+        'Kitchen doorWall=west (into dining), platformWall=east ✓',
+        'Private wing on left (bedrooms), public on right (living+kitchen) — clear split ✓',
       ],
     },
   },
 
-  // ── EXAMPLE 4: 25×30ft, South-facing, 2BHK, Compact ─────────────────────
-  // Tests: small plot where every ft counts — rooms must still hit minimums
+  // ── EXAMPLE 4: 25×40ft plot, South-facing, 2BHK, Compact ────────────────
+  // Buildable: 19×32ft (setbacks L3 R3 F4 B4)
   {
     input: {
-      plotWidth: 25, plotHeight: 30, facing: 'SOUTH',
-      bedrooms: 2, bathrooms: 1, style: 'Compact',
+      plotWidth: 25, plotHeight: 40, facing: 'SOUTH',
+      bedrooms: 2, bathrooms: 1,
+      buildableW: 19, buildableH: 32,
     },
     output: {
       planName: 'South-facing Compact 2BHK',
       layoutType: 'compact',
-      engineerThinking: 'Road is on the south. Small 21×24ft buildable area demands a compact single-column layout — no room for a wide private wing. Parking is omitted to save space (street parking). Balcony is narrow and front-facing only. Kitchen at rear-north gets full cross-ventilation and avoids road noise. Single bathroom tucked between both bedrooms.',
+      engineerThinking: 'Road on south. Very compact 19×32ft buildable requires a single-column stack. Balcony at front (y=0, south) maximises street presence. Living room behind balcony gets south light. Kitchen pushed to rear-left corner with north window — away from road noise. Single bathroom between bedrooms at the rear.',
       vastuCompliant: false,
-      sunlightStrategy: 'Living room faces south toward road — gets maximum winter sun through full-width south windows.',
-      ventilationStrategy: 'Single-column layout allows north-south breeze through kitchen-to-living alignment.',
+      sunlightStrategy: 'South-facing balcony and living room get maximum winter sun — critical for compact homes.',
+      ventilationStrategy: 'Narrow plot creates natural north-south stack ventilation from kitchen to living room.',
       rooms: [
-        { id: 'balcony', label: 'Balcony',         type: 'balcony',        band: 1, col: 2, colSpan: 2, sizeWeight: 3, doorWall: 'north', windowWall: 'south', platformWall: 'none',  minW: 8,  minH: 5  },
-        { id: 'living',  label: 'Living Room',      type: 'living',         band: 2, col: 1, colSpan: 3, sizeWeight: 5, doorWall: 'south', windowWall: 'south', platformWall: 'none',  minW: 12, minH: 12 },
-        { id: 'dining',  label: 'Dining Room',      type: 'dining',         band: 2, col: 1, colSpan: 2, sizeWeight: 3, doorWall: 'east',  windowWall: 'west',  platformWall: 'none',  minW: 10, minH: 10 },
-        { id: 'kitchen', label: 'Kitchen',          type: 'kitchen',        band: 2, col: 3, colSpan: 1, sizeWeight: 3, doorWall: 'south', windowWall: 'north', platformWall: 'north', minW: 8,  minH: 10 },
-        { id: 'mbed',    label: 'Master Bedroom',   type: 'master_bedroom', band: 3, col: 1, colSpan: 2, sizeWeight: 5, doorWall: 'south', windowWall: 'north', platformWall: 'none',  minW: 12, minH: 12 },
-        { id: 'bath1',   label: 'Bathroom',         type: 'bathroom',       band: 3, col: 2, colSpan: 1, sizeWeight: 1, doorWall: 'south', windowWall: 'none',  platformWall: 'none',  minW: 5,  minH: 7  },
-        { id: 'bed2',    label: 'Bedroom 2',        type: 'bedroom',        band: 3, col: 3, colSpan: 1, sizeWeight: 4, doorWall: 'south', windowWall: 'north', platformWall: 'none',  minW: 10, minH: 10 },
+        { type: 'balcony',        label: 'Balcony',        x: 0,  y: 0,  width: 19, height: 5  },
+        { type: 'living_room',    label: 'Living Room',    x: 0,  y: 5,  width: 19, height: 12 },
+        { type: 'dining',         label: 'Dining Room',    x: 0,  y: 17, width: 10, height: 8  },
+        { type: 'kitchen',        label: 'Kitchen',        x: 10, y: 17, width: 9,  height: 8,  windowWall: 'north', doorWall: 'west', platformWall: 'north' },
+        { type: 'master_bedroom', label: 'Master Bedroom', x: 0,  y: 25, width: 12, height: 7  },
+        { type: 'bathroom',       label: 'Bathroom',       x: 12, y: 25, width: 7,  height: 7  },
+        { type: 'bedroom',        label: 'Bedroom 2',      x: 0,  y: 32, width: 19, height: 0  },
       ],
       _notes: [
-        'Small plot: no parking — street parking used instead',
-        'kitchen is col:3 band:2 — platformWall=north, doorWall=south (opposite walls)',
-        'bath1 is col:2 band:3 — directly between master bedroom and bed2, accessible from both',
-        'bath1 and kitchen share col:3 NO — bath is col:2 and kitchen is col:3: different columns',
-        'bath1 is band:3, kitchen is band:2 — even if same column, DIFFERENT band = no shared wall',
-        'Living room spans full width (colSpan:3) — makes small plot feel spacious',
+        'Compact: single column layout — no room for side wings at 19ft width',
+        'Kitchen at x=10-19, y=17-25. Bathroom at x=12-19, y=25-32. Different y range — no shared wall ✓',
+        'Kitchen doorWall=west (into dining at y=17-25, x=0-10 — shared wall) ✓',
+        'Kitchen platformWall=north (rear wall), windowWall=north ✓',
+        'Balcony at y=0 (front/south road side) ✓',
       ],
     },
   },
 
-  // ── EXAMPLE 5: 60×50ft, West-facing, 5BHK, Open Plan ────────────────────
-  // Tests: large plot — open-plan merging, multiple bathrooms correctly placed
+  // ── EXAMPLE 5: 60×60ft plot, West-facing, 5BHK ──────────────────────────
+  // Buildable: 52×52ft (setbacks L4 R4 F4 B4)
   {
     input: {
-      plotWidth: 60, plotHeight: 50, facing: 'WEST',
-      bedrooms: 5, bathrooms: 4, style: 'Open Plan',
+      plotWidth: 60, plotHeight: 60, facing: 'WEST',
+      bedrooms: 5, bathrooms: 4,
+      buildableW: 52, buildableH: 52,
     },
     output: {
-      planName: 'West-facing Open 5BHK',
+      planName: 'West-facing Open-Plan 5BHK',
       layoutType: 'open',
-      engineerThinking: 'Road is on the west. Large 56×44ft buildable area allows true open-plan public zone — living, dining, kitchen merge into one continuous space in band 2. Five bedrooms split across two columns in band 3 with dedicated bathrooms. Kitchen at southwest corner uses west light for evening cooking. All bathrooms are in band 3 — completely separated from kitchen in band 2.',
+      engineerThinking: 'Road on west. Large 52×52ft buildable enables a true open-plan public zone. Living and dining merge in the front band. Kitchen at north-rear corner maximises distance from road entry. Five bedrooms in two rear rows with four bathrooms each serving a bedroom. No bathroom is adjacent to the kitchen.',
       vastuCompliant: false,
-      sunlightStrategy: 'Living room on west wall captures evening light. Bedrooms on east wall get morning light for natural wake-up.',
-      ventilationStrategy: 'Open-plan band 2 allows full east-west cross-ventilation. Five bedroom windows on east create morning draft.',
+      sunlightStrategy: 'West-facing living room captures evening light. East rear bedrooms get quiet morning light.',
+      ventilationStrategy: 'Open-plan front zone and full-width bedroom rows allow east-west cross-ventilation throughout.',
       rooms: [
-        { id: 'parking', label: 'Parking',         type: 'parking',        band: 1, col: 1, colSpan: 1, sizeWeight: 2, doorWall: 'west',  windowWall: 'none',  platformWall: 'none',  minW: 9,  minH: 18 },
-        { id: 'balcony', label: 'Balcony',          type: 'balcony',        band: 1, col: 2, colSpan: 2, sizeWeight: 6, doorWall: 'east',  windowWall: 'west',  platformWall: 'none',  minW: 15, minH: 5  },
-        { id: 'living',  label: 'Living Room',      type: 'living',         band: 2, col: 1, colSpan: 2, sizeWeight: 5, doorWall: 'east',  windowWall: 'west',  platformWall: 'none',  minW: 16, minH: 14 },
-        { id: 'dining',  label: 'Dining Room',      type: 'dining',         band: 2, col: 2, colSpan: 1, sizeWeight: 4, doorWall: 'south', windowWall: 'north', platformWall: 'none',  minW: 12, minH: 12 },
-        { id: 'kitchen', label: 'Kitchen',          type: 'kitchen',        band: 2, col: 3, colSpan: 1, sizeWeight: 3, doorWall: 'north', windowWall: 'west',  platformWall: 'west',  minW: 10, minH: 12 },
-        { id: 'mbed',    label: 'Master Bedroom',   type: 'master_bedroom', band: 3, col: 1, colSpan: 2, sizeWeight: 5, doorWall: 'north', windowWall: 'east',  platformWall: 'none',  minW: 14, minH: 14 },
-        { id: 'bath1',   label: 'Master Bath',      type: 'bathroom',       band: 3, col: 1, colSpan: 1, sizeWeight: 1, doorWall: 'east',  windowWall: 'none',  platformWall: 'none',  minW: 5,  minH: 8  },
-        { id: 'bed2',    label: 'Bedroom 2',        type: 'bedroom',        band: 3, col: 2, colSpan: 1, sizeWeight: 4, doorWall: 'north', windowWall: 'east',  platformWall: 'none',  minW: 11, minH: 11 },
-        { id: 'bath2',   label: 'Bathroom 2',       type: 'bathroom',       band: 3, col: 2, colSpan: 1, sizeWeight: 1, doorWall: 'north', windowWall: 'none',  platformWall: 'none',  minW: 5,  minH: 7  },
-        { id: 'bed3',    label: 'Bedroom 3',        type: 'bedroom',        band: 3, col: 3, colSpan: 1, sizeWeight: 4, doorWall: 'north', windowWall: 'east',  platformWall: 'none',  minW: 11, minH: 11 },
-        { id: 'bed4',    label: 'Bedroom 4',        type: 'bedroom',        band: 3, col: 3, colSpan: 1, sizeWeight: 4, doorWall: 'north', windowWall: 'east',  platformWall: 'none',  minW: 11, minH: 11 },
-        { id: 'bath3',   label: 'Bathroom 3',       type: 'bathroom',       band: 3, col: 3, colSpan: 1, sizeWeight: 1, doorWall: 'west',  windowWall: 'none',  platformWall: 'none',  minW: 5,  minH: 7  },
-        { id: 'bed5',    label: 'Bedroom 5',        type: 'bedroom',        band: 3, col: 2, colSpan: 1, sizeWeight: 4, doorWall: 'north', windowWall: 'east',  platformWall: 'none',  minW: 11, minH: 11 },
-        { id: 'bath4',   label: 'Bathroom 4',       type: 'bathroom',       band: 3, col: 1, colSpan: 1, sizeWeight: 1, doorWall: 'east',  windowWall: 'none',  platformWall: 'none',  minW: 5,  minH: 7  },
+        { type: 'balcony',        label: 'Balcony',        x: 0,  y: 0,  width: 36, height: 5  },
+        { type: 'living_room',    label: 'Living Room',    x: 0,  y: 5,  width: 36, height: 16 },
+        { type: 'dining',         label: 'Dining Room',    x: 36, y: 5,  width: 16, height: 10 },
+        { type: 'kitchen',        label: 'Kitchen',        x: 36, y: 15, width: 16, height: 12, windowWall: 'east', doorWall: 'north', platformWall: 'east' },
+        { type: 'master_bedroom', label: 'Master Bedroom', x: 0,  y: 21, width: 18, height: 14 },
+        { type: 'bathroom',       label: 'Master Bath',    x: 18, y: 21, width: 8,  height: 14 },
+        { type: 'bedroom',        label: 'Bedroom 2',      x: 26, y: 21, width: 14, height: 14 },
+        { type: 'bedroom',        label: 'Bedroom 3',      x: 40, y: 21, width: 12, height: 14 },
+        { type: 'bathroom',       label: 'Bathroom 2',     x: 36, y: 27, width: 16, height: 8  },
+        { type: 'bedroom',        label: 'Bedroom 4',      x: 0,  y: 35, width: 18, height: 17 },
+        { type: 'bathroom',       label: 'Bathroom 3',     x: 18, y: 35, width: 8,  height: 17 },
+        { type: 'bedroom',        label: 'Bedroom 5',      x: 26, y: 35, width: 26, height: 17 },
+        { type: 'bathroom',       label: 'Bathroom 4',     x: 44, y: 35, width: 8,  height: 17 },
       ],
       _notes: [
-        'All 4 bathrooms are in band:3 — kitchen is in band:2. Zero shared walls possible.',
-        'kitchen platformWall=west, doorWall=north — not the same wall, rule enforced',
-        'Open plan: living+dining in same band creates large connected space',
-        'master bedroom colSpan:2 fills left half of band 3 — generous size on large plot',
-        'Five bedrooms fit by stacking rows within band 3 columns',
+        'Kitchen at x=36-52, y=15-27. All bathrooms are at y=21-52 — no shared wall with kitchen ✓',
+        'Kitchen doorWall=north (into dining at y=5-15), platformWall=east ✓',
+        'Open-plan: living (36ft wide) + dining share front zone',
+        'Two bedroom rows: y=21-35 and y=35-52 — each row has dedicated bathrooms',
+        'No bathroom is at y=15-27 (kitchen zone) ✓',
       ],
     },
   },
@@ -200,22 +208,23 @@ const EXAMPLE_PLANS = [
 
 /**
  * buildFewShotSection()
- * Returns the few-shot block injected before the new plot request.
- * Gemini reads examples → copies the spatial pattern for new designs.
+ * Returns the few-shot block injected into every Gemini prompt.
+ * Shows Gemini the x/y/width/height coordinate system with verified examples.
  */
 function buildFewShotSection() {
   return EXAMPLE_PLANS.map((ex, i) => {
-    // Strip _notes from the output JSON Gemini sees (keep it clean)
     const cleanOutput = { ...ex.output };
     delete cleanOutput._notes;
 
-    return `EXAMPLE ${i + 1}:
+    return `EXAMPLE ${i + 1} — ${ex.input.plotWidth}×${ex.input.plotHeight}ft ${ex.input.facing}-facing ${ex.input.bedrooms}BHK:
+Buildable area: ${ex.input.buildableW}ft wide × ${ex.input.buildableH}ft deep
+
 Input: ${JSON.stringify(ex.input, null, 2)}
 
-Correct output:
+Correct output (use this coordinate style):
 ${JSON.stringify(cleanOutput, null, 2)}
 
-Why this is correct:
+Why this layout is correct:
 ${ex.output._notes.map(n => '  - ' + n).join('\n')}`;
   }).join('\n\n---\n\n');
 }

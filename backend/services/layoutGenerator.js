@@ -489,7 +489,7 @@ function buildSmartServiceFront(W, H, req) {
  */
 async function generateLayoutVariationsStream(plot, requirements, preferences = {}, count = 3, onPlanReady) {
   const { getDesignRecommendations, callGemini } = require('../src/ai/geminiPrompt');
-  const { resolveLayout, SCALE }                 = require('../src/engine/layoutResolver');
+  // resolveLayout removed — Gemini now outputs x/y/width/height directly
   const { TYPE_TO_FRONTEND }                     = require('../src/knowledge/physicalRules');
 
   const plotData  = parsePlot(plot);
@@ -608,40 +608,65 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
 
     if (process.env.GEMINI_API_KEY) {
       try {
+        const sb = plotData.setback || {};
         const geminiPlan = await callGemini({
           plotWidth:  plotData.width,
           plotHeight: plotData.length,
-          facing:     plotData.facing || 'North',
+          facing:     (plotData.facing || 'NORTH').toUpperCase(),
           bedrooms:   req.bedrooms,
           bathrooms:  req.bathrooms,
           style:      cfg.theme || style,
           priorities: ['natural light', 'privacy', 'ventilation'],
           setbacks: {
-            front: plotData.setback?.front || 3,
-            rear:  plotData.setback?.back  || 3,
-            left:  plotData.setback?.left  || 2,
-            right: plotData.setback?.right || 2,
+            front: sb.front || 6,
+            rear:  sb.back  || 4,
+            left:  sb.left  || 4,
+            right: sb.right || 4,
           },
           city: preferences.city || 'Central India',
         });
 
+        // Gemini now returns x/y/width/height directly — no resolveLayout needed
         if (geminiPlan?.rooms?.length >= 3) {
-          // ── B: resolveLayout → pixels → feet (buildable-relative) ─────────
-          const pixelRooms = resolveLayout(geminiPlan, buildableW, buildableH);
-          const ftRooms = pixelRooms.map(r => ({
-            type:   TYPE_TO_FRONTEND[r.type] || r.type,
-            x:      r.x / SCALE,
-            y:      r.y / SCALE,
-            width:  r.w / SCALE,
-            height: r.h / SCALE,
-          }));
-          // Add staircase if multi-floor
+          const ftRooms = geminiPlan.rooms
+            .filter(r => r.type && r.width > 0 && r.height > 0)
+            .map(r => ({
+              type:         TYPE_TO_FRONTEND[r.type] || r.type,
+              label:        r.label,
+              x:            Math.max(0, Number(r.x)      || 0),
+              y:            Math.max(0, Number(r.y)      || 0),
+              width:        Math.max(1, Number(r.width)  || 8),
+              height:       Math.max(1, Number(r.height) || 8),
+              windowWall:   r.windowWall   || 'none',
+              doorWall:     r.doorWall     || 'south',
+              platformWall: r.platformWall || 'none',
+            }))
+            // Clamp to buildable area
+            .map(r => ({
+              ...r,
+              x:      Math.min(r.x,      buildableW - r.width),
+              y:      Math.min(r.y,      buildableH - r.height),
+              width:  Math.min(r.width,  buildableW),
+              height: Math.min(r.height, buildableH),
+            }));
+
           if ((req.floors || 1) > 1) {
             ftRooms.push(_staircaseRoom(req.staircase_type, req.staircase_position, buildableW, buildableH));
           }
+
+          // Store metadata for feedback loop
+          ftRooms._geminiMeta = {
+            planName:            geminiPlan.planName,
+            layoutType:          geminiPlan.layoutType,
+            engineerThinking:    geminiPlan.engineerThinking,
+            vastuCompliant:      geminiPlan.vastuCompliant,
+            sunlightStrategy:    geminiPlan.sunlightStrategy,
+            ventilationStrategy: geminiPlan.ventilationStrategy,
+          };
+
           rooms    = ftRooms;
           aiSource = 'gemini-room-design';
-          console.log(`  Plan ${i + 1} (${style}): Gemini designed ${rooms.length} rooms`);
+          console.log(`  Plan ${i + 1}: Gemini designed ${rooms.length} rooms for ${plotData.width}×${plotData.length}ft ${plotData.facing}-facing`);
         }
       } catch (err) {
         console.warn(`  Plan ${i + 1}: Gemini room design failed (${err.message}) — using smart builder`);
@@ -717,23 +742,23 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
           bathrooms:  req.bathrooms,
           style:      cfg.theme || style,
         };
+        const meta = rooms._geminiMeta || {};
         const geminiPlan = {
-          planName:            layout.planName,
-          layoutType:          style,
-          engineerThinking:    layout.engineerThinking,
-          vastuCompliant:      layout.vastuCompliant,
-          sunlightStrategy:    layout.sunlightStrategy,
-          ventilationStrategy: layout.ventilationStrategy,
-          rooms: rooms.map(r => ({
+          planName:            meta.planName            || layout.planName,
+          layoutType:          meta.layoutType          || style,
+          engineerThinking:    meta.engineerThinking    || layout.engineerThinking,
+          vastuCompliant:      meta.vastuCompliant      ?? layout.vastuCompliant,
+          sunlightStrategy:    meta.sunlightStrategy    || layout.sunlightStrategy,
+          ventilationStrategy: meta.ventilationStrategy || layout.ventilationStrategy,
+          rooms: rooms.filter(r => r.type).map(r => ({
             type:         r.type,
-            band:         r.band         || (r.y < buildableH * 0.33 ? 1 : r.y < buildableH * 0.66 ? 2 : 3),
-            col:          r.col          || 2,
-            colSpan:      r.colSpan      || 1,
-            sizeWeight:   r.sizeWeight   || 3,
-            minH:         r.minH         || r.height,
-            minW:         r.minW         || r.width,
-            windowWall:   r.windowWall   || 'south',
-            doorWall:     r.doorWall     || 'north',
+            label:        r.label,
+            x:            r.x,
+            y:            r.y,
+            width:        r.width,
+            height:       r.height,
+            windowWall:   r.windowWall   || 'none',
+            doorWall:     r.doorWall     || 'south',
             platformWall: r.platformWall || 'none',
           })),
         };

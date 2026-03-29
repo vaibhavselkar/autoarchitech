@@ -66,104 +66,81 @@ function buildPrompt(params) {
   const buildableW = plotWidth  - (setbacks.left  || 2) - (setbacks.right || 2);
   const buildableH = plotHeight - (setbacks.front || 3) - (setbacks.rear  || 3);
 
-  // Build the few-shot block — Gemini studies these before designing
   const fewShot = buildFewShotSection();
 
   return `
-═══════════════════════════════════════════════
-STUDY THESE ${5} CORRECT EXAMPLES FIRST
-═══════════════════════════════════════════════
-Before designing anything, study these verified correct floor plans.
-Copy the EXACT same patterns for:
-  • bathroom placement (always different band OR different column from kitchen)
-  • kitchen platformWall vs doorWall (never the same wall)
-  • minH and minW values (always specified, never below mandatory minimums)
-  • sizeWeight values (bathroom=1, living=5, bedroom=4, kitchen=3, dining=3)
+You are designing a floor plan. Study these verified correct examples first, then design a NEW plan.
 
+═══════════════════════════════════════════════
+VERIFIED CORRECT EXAMPLES — study the coordinate system
+═══════════════════════════════════════════════
 ${fewShot}
 
 ═══════════════════════════════════════════════
-NOW DESIGN A NEW FLOOR PLAN FOR THIS PLOT
+NOW DESIGN THIS NEW FLOOR PLAN
 ═══════════════════════════════════════════════
 
 PLOT:
-- Total size: ${plotWidth}ft wide × ${plotHeight}ft deep
-- Buildable area: ${buildableW}ft × ${buildableH}ft (after setbacks)
-- Road facing: ${facing}
-- City/region: ${city}
-- Setbacks: front ${setbacks.front}ft, rear ${setbacks.rear}ft,
-            left ${setbacks.left}ft, right ${setbacks.right}ft
-
-REQUIREMENTS:
-- Bedrooms: ${bedrooms} (always include 1 master bedroom)
-- Bathrooms: ${bathrooms}
-- Always include: living room, kitchen, dining room, balcony, parking
+- Total plot: ${plotWidth}ft wide × ${plotHeight}ft deep
+- BUILDABLE AREA: ${buildableW}ft wide × ${buildableH}ft deep
+  (origin x=0,y=0 is the FRONT-LEFT corner of the buildable area)
+  (x grows RIGHT, y grows DOWN away from the road)
+  (y=0 = road side, y=${buildableH} = rear/garden side)
+- Road facing: ${facing} (the road is on the ${facing} side)
+- City: ${city}
 - Style: ${style}
 - Priorities: ${priorities.join(', ')}
 
+REQUIREMENTS:
+- ${bedrooms} bedrooms (first must be master_bedroom)
+- ${bathrooms} bathrooms
+- Must include: living_room, kitchen, dining, balcony
+- Must include: parking (placed outside buildable area at y < 0 or beside it — use y=0 as gate line)
+
 ${ROOM_MINIMUMS}
 
-YOUR TASK:
-Design the room layout following the same pattern as the examples above.
-For each room, decide:
-  1. Which BAND it belongs to:
-     band 1 = front zone (near road) — for parking, balcony, entry
-     band 2 = middle zone — for living, dining, kitchen
-     band 3 = rear zone (away from road) — for bedrooms, bathrooms
-  2. Which COLUMN within its band:
-     col 1 = left side, col 2 = center, col 3 = right side
-     (a room can span multiple columns using colSpan)
-  3. SIZE WEIGHT — relative size compared to other rooms in same band:
-     living=5, bedroom=4, kitchen=3, dining=3, bathroom=1, corridor=1
-  4. Which wall gets the WINDOW
-  5. Which wall gets the DOOR (must not be same as platformWall for kitchen)
-  6. Which wall has the PLATFORM (kitchen only — same wall as windowWall)
-  7. minH — minimum height in feet (use values from MANDATORY MINIMUMS above)
-  8. minW — minimum width in feet (use values from MANDATORY MINIMUMS above)
+COORDINATE RULES:
+- Every room's x must be: 0 ≤ x ≤ ${buildableW} - width
+- Every room's y must be: 0 ≤ y ≤ ${buildableH} - height
+- Rooms must NOT overlap each other
+- All rooms together should cover most of the ${buildableW}×${buildableH}ft buildable area
+- Parking is placed at y=-(parking_height) (in front of buildable area near the gate)
 
-CRITICAL RULES (same as in the examples):
-- Bathroom NEVER shares a wall with kitchen:
-    • If bathroom and kitchen are in the SAME column, they must be in DIFFERENT bands
-    • If in the SAME band, they must be in DIFFERENT columns
-    • Safest: place all bathrooms in band 3, kitchen in band 2
-- Kitchen MUST be adjacent to dining room (same band, neighboring cols)
-- Master bedroom MUST be in band 3 — away from road noise
-- Parking MUST be in band 1 — near gate
-- Bathroom must be adjacent to at least one bedroom
-- Kitchen platformWall = windowWall (light while cooking)
-- Kitchen doorWall = OPPOSITE wall to platformWall (never same wall)
-- Every bedroom must have a windowWall
-- If Vastu style: kitchen in SE, master bed in SW, living in NW or NE
+CRITICAL DESIGN RULES:
+- Bathroom must NEVER be directly adjacent to kitchen (no shared wall)
+- Kitchen must be adjacent to dining (shared wall)
+- Master bedroom must be at the rear (high y values, away from road)
+- Balcony must be at the front (low y values, near road)
+- Every bedroom must have an exterior wall for a window
+- Kitchen: platformWall and windowWall are the same; doorWall is the opposite wall
 
-Return ONLY this JSON structure (no markdown, no explanation):
+Return ONLY this JSON (no markdown, no explanation, no code blocks):
 
 {
-  "planName": "short descriptive name e.g. 'Sunlit Vastu 3BHK'",
-  "layoutType": "linear|split|compact|open|courtyard|vastu",
-  "engineerThinking": "3-4 sentences explaining key design decisions and why",
-  "vastuCompliant": true or false,
-  "sunlightStrategy": "one sentence about natural light maximization",
-  "ventilationStrategy": "one sentence about cross-ventilation approach",
+  "planName": "descriptive unique name e.g. 'Sunlit North 3BHK'",
+  "layoutType": "linear|split|compact|open|vastu",
+  "engineerThinking": "3-4 sentences: key spatial decisions, why rooms are placed where they are",
+  "vastuCompliant": false,
+  "sunlightStrategy": "one sentence",
+  "ventilationStrategy": "one sentence",
   "rooms": [
     {
-      "id": "unique_id e.g. living, kitchen, mbed, bed2, bath1",
-      "label": "display name e.g. Living Room",
-      "type": "living|dining|kitchen|master_bedroom|bedroom|bathroom|balcony|parking|corridor|entry",
-      "band": 1,
-      "col": 1,
-      "colSpan": 1,
-      "sizeWeight": 5,
-      "minH": 12,
-      "minW": 12,
-      "windowWall": "north|south|east|west|none",
-      "doorWall": "north|south|east|west",
-      "platformWall": "north|south|east|west|none",
-      "notes": "why this room is here"
+      "type": "living_room|dining|kitchen|master_bedroom|bedroom|bathroom|balcony|parking|corridor|entry|staircase",
+      "label": "Living Room",
+      "x": 0,
+      "y": 5,
+      "width": 20,
+      "height": 14,
+      "windowWall": "west",
+      "doorWall": "east",
+      "platformWall": "none"
     }
   ]
 }
 
-Include ALL rooms. Do not skip any room type requested.
+Design a genuinely unique layout — do NOT copy the example plans.
+Use the full ${buildableW}×${buildableH}ft buildable area creatively.
+Include ALL required rooms. All coordinates in FEET.
 `.trim();
 }
 
