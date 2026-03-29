@@ -490,50 +490,84 @@ function buildOpenSocialHub(W, H, req) {
   const baths     = clp(parseInt(req.bathrooms || 2), 0, beds);
   const hasStairs = (req.floors || 1) > 1;
 
-  // Need at least ~26ft wide for this split to work
   if (W < 26) return buildSmartLinear(W, H, req);
+
+  const MIN_LIV  = 10, MIN_DIN = 10, MIN_KIT = 8, MIN_BED = 10, MIN_BATH = 7, MIN_BALC = 5;
 
   const rooms = [];
 
   // ── Front: balcony full width ──────────────────────────────────────────
-  const balcH = clp(Math.round(H * 0.10), VM.balc, 7);
+  const balcH = clp(Math.round(H * 0.09), MIN_BALC, 7);
   rooms.push({ type: 'balcony', x: 0, y: 0, width: W, height: balcH });
 
-  // ── Middle: merged open living+dining (LEFT 60%) + kitchen box (RIGHT 40%) ──
-  const socialH = clp(Math.round(H * 0.38), VM.liv, Math.round(H * 0.45));
-  const socialW = r2(W * 0.60);
+  // ── Bedroom zone: 2 beds per row (like _placePrivateRows) → fewer rows ──
+  // Row count: ceil(beds/2) so 3 beds = 2 rows, 4 beds = 2 rows, 5 = 3 rows
+  const bedRowCount = Math.ceil(beds / 2);
+  const minBedZoneH = bedRowCount * MIN_BED;
+
+  // ── Social zone: must fit living (≥10) + dining (≥10) + kitchen (≥8) ──
+  const minSocialH  = MIN_LIV + MIN_DIN;   // kitchen is in a side column, not vertical
+  const availH      = H - balcH;
+  // Guarantee both zones meet their minimums; give beds exactly what they need,
+  // then give the rest to social zone
+  const bedZoneH    = Math.max(minBedZoneH, Math.round(availH * 0.50));
+  const socialH     = Math.max(minSocialH,  availH - bedZoneH);
+  // Re-clamp bed zone so total = availH
+  const actualBedH  = availH - socialH;
+  const eachBedH    = Math.max(MIN_BED, Math.floor(actualBedH / bedRowCount));
+
+  // Social zone: living (LEFT column) + dining stacked, kitchen RIGHT column
+  const socialW = r2(W * 0.62);
   const kitW    = W - socialW;
-  const kitH    = clp(Math.round(socialH * 0.65), 8, socialH);
-  const entryH  = socialH - kitH;  // entry/utility fills gap above kitchen
+  const livH    = Math.max(MIN_LIV, Math.round(socialH * 0.55));
+  const dinH    = socialH - livH;   // dining = rest — guaranteed ≥ MIN_DIN because socialH ≥ minSocialH
+  const kitH    = Math.max(MIN_KIT, socialH);  // kitchen spans full social height (RIGHT column)
 
-  rooms.push({ type: 'living_room', x: 0,       y: balcH, width: socialW, height: Math.round(socialH * 0.58) });
-  rooms.push({ type: 'dining',      x: 0,       y: balcH + Math.round(socialH * 0.58), width: socialW, height: socialH - Math.round(socialH * 0.58) });
-  rooms.push({ type: 'kitchen',     x: socialW, y: balcH, width: kitW,    height: kitH  });
-  if (entryH >= 4) {
-    rooms.push({ type: 'entry',     x: socialW, y: balcH + kitH, width: kitW, height: entryH });
-  }
+  rooms.push({ type: 'living_room', x: 0,       y: balcH,        width: socialW, height: livH  });
+  rooms.push({ type: 'dining',      x: 0,       y: balcH + livH, width: socialW, height: dinH  });
+  rooms.push({ type: 'kitchen',     x: socialW, y: balcH,        width: kitW,    height: kitH  });
 
-  // ── Rear: bedrooms+baths in rows ─────────────────────────────────────────
+  // ── Rear: 2 beds per row ──────────────────────────────────────────────
   const bedStartY = balcH + socialH;
-  const bedZoneH  = H - bedStartY;
-  const bedRows   = beds;
-  const eachBedH  = Math.max(VM.bed, Math.floor(bedZoneH / bedRows));
-  const bathW     = clp(Math.round(W * 0.22), 6, 9);
-  const bedW      = W - bathW;
+  const bathW     = clp(Math.round(W * 0.20), 6, 9);
+  let   bathIdx   = 0;
+  let   bedsLeft  = beds;
 
-  let bathIdx = 0;
-  for (let i = 0; i < bedRows; i++) {
-    const bedType = i === 0 ? 'master_bedroom' : 'bedroom';
-    const rowH    = i === bedRows - 1 ? (H - (bedStartY + i * eachBedH)) : eachBedH;
-    const yRow    = bedStartY + i * eachBedH;
-    if (bathIdx < baths) {
-      // Bath on RIGHT for open hub (mirror of linear which has bath on right too — but column arrangement differs)
-      rooms.push({ type: bedType,    x: 0,    y: yRow, width: bedW,  height: rowH });
-      rooms.push({ type: 'bathroom', x: bedW, y: yRow, width: bathW, height: rowH });
-      bathIdx++;
+  for (let row = 0; row < bedRowCount; row++) {
+    const bedsThisRow = Math.min(2, bedsLeft);
+    const rowH   = row === bedRowCount - 1 ? Math.max(MIN_BED, H - bedStartY - row * eachBedH) : eachBedH;
+    const yRow   = bedStartY + row * eachBedH;
+    const hasBath = bathIdx < baths;
+
+    if (bedsThisRow === 2) {
+      // Two beds side by side; bathroom in the middle if available
+      if (hasBath) {
+        const bw  = bathW;
+        const bw1 = r2((W - bw) / 2);
+        const bedType1 = (row === 0 && beds >= 1) ? 'master_bedroom' : 'bedroom';
+        rooms.push({ type: bedType1,   x: 0,        y: yRow, width: bw1,      height: rowH });
+        rooms.push({ type: 'bathroom', x: bw1,      y: yRow, width: bw,       height: rowH });
+        rooms.push({ type: 'bedroom',  x: bw1 + bw, y: yRow, width: W-bw1-bw, height: rowH });
+        bathIdx++;
+      } else {
+        const w1 = r2(W / 2);
+        const bedType1 = (row === 0) ? 'master_bedroom' : 'bedroom';
+        rooms.push({ type: bedType1,  x: 0,  y: yRow, width: w1,     height: rowH });
+        rooms.push({ type: 'bedroom', x: w1, y: yRow, width: W - w1, height: rowH });
+      }
     } else {
-      rooms.push({ type: bedType, x: 0, y: yRow, width: W, height: rowH });
+      // Single bed row
+      const bedType = (row === 0) ? 'master_bedroom' : 'bedroom';
+      if (hasBath) {
+        const bedW = W - bathW;
+        rooms.push({ type: bedType,    x: 0,    y: yRow, width: bedW,  height: rowH });
+        rooms.push({ type: 'bathroom', x: bedW, y: yRow, width: bathW, height: rowH });
+        bathIdx++;
+      } else {
+        rooms.push({ type: bedType, x: 0, y: yRow, width: W, height: rowH });
+      }
     }
+    bedsLeft -= bedsThisRow;
   }
 
   if (hasStairs) rooms.push(_staircaseRoom(req.staircase_type, req.staircase_position, W, H));
@@ -562,51 +596,78 @@ function buildSpineLayout(W, H, req) {
 
   const rooms = [];
 
-  // Balcony at front — partial width (left 55%)
+  // Front: balcony partial-width (left 58%)
   const balcH = clp(Math.round(H * 0.09), VM.balc, 7);
-  const balcW = r2(W * 0.55);
+  const balcW = r2(W * 0.58);
   rooms.push({ type: 'balcony', x: 0, y: 0, width: balcW, height: balcH });
 
-  // Corridor band runs across full width
-  const corrW = VM.serv;   // ~10ft — wider than a passage to be its own zone
-  const corrH = 4;         // corridor is thin — 4ft
-  const frontH = clp(Math.round((H - balcH - corrH) * 0.42), VM.liv, Math.round(H * 0.45));
-  const rearH  = H - balcH - frontH - corrH;
+  // Horizontal corridor strip (the "spine")
+  const corrH = 4;
 
-  const corrY  = balcH + frontH;
+  // Front zone height: must fit living (≥10) AND dining (≥10) + kitchen (≥8)
+  // Kitchen is in a right column so its height ≤ frontH; dining stacks with kitchen
+  // Min frontH = max(living_min, kit_min + din_min) = max(10, 8+10) = 18
+  const bedRowCount = Math.ceil(beds / 2);
+  const minBedH     = bedRowCount * VM.bed;
+  const minFrontH   = Math.max(VM.liv, 18);   // 18 = kitchen(8) + dining(10) stacked right
+  const remH        = H - balcH - corrH;
+  const [frontH, rearH] = _zoneHeights(remH, [
+    { min: minFrontH,  shares: 1.8 },
+    { min: minBedH,    shares: 1.2 * bedRowCount },
+  ]);
 
-  // ── Front zone: living LEFT (large) + dining+kitchen RIGHT (stacked) ─────
-  const livW   = r2(W * 0.58);
-  const servW  = W - livW;
-  const kitH   = clp(Math.round(frontH * 0.45), 8, frontH - VM.serv);
-  const dinH   = frontH - kitH;
+  const corrY = balcH + frontH;
 
-  rooms.push({ type: 'living_room', x: 0,    y: balcH, width: livW,  height: frontH });
-  rooms.push({ type: 'kitchen',     x: livW, y: balcH, width: servW, height: kitH   });
-  rooms.push({ type: 'dining',      x: livW, y: balcH + kitH, width: servW, height: dinH });
+  // Front zone: living LEFT (full height) + kitchen+dining RIGHT stacked
+  const livW  = r2(W * 0.58);
+  const servW = W - livW;
+  // Kitchen and dining heights — both must meet minimums
+  const [kitH, dinH] = _zoneHeights(frontH, [
+    { min: VM.kit, shares: 1 },
+    { min: VM.serv, shares: 1 },
+  ]);
 
-  // ── Corridor band ────────────────────────────────────────────────────────
+  rooms.push({ type: 'living_room', x: 0,    y: balcH,          width: livW,  height: frontH });
+  rooms.push({ type: 'kitchen',     x: livW, y: balcH,          width: servW, height: kitH   });
+  rooms.push({ type: 'dining',      x: livW, y: balcH + kitH,   width: servW, height: dinH   });
+
+  // Corridor
   rooms.push({ type: 'corridor', x: 0, y: corrY, width: W, height: corrH });
 
-  // ── Rear zone: bedrooms+baths arranged left-to-right ────────────────────
-  const totalBedsW = W;
-  const bathW      = clp(Math.round(W * 0.20), 6, 9);
-  let x = 0;
-  for (let i = 0; i < beds; i++) {
-    const bedType = i === 0 ? 'master_bedroom' : 'bedroom';
-    const isLast  = i === beds - 1;
-    // Each bedroom gets equal width slice; last one fills remainder
-    const sliceW  = isLast ? (W - x) : Math.floor(totalBedsW / beds);
-    const hasBath = i < baths;
+  // Rear zone: 2 beds per row side-by-side (spine's distinguishing feature)
+  const eachBedH = Math.max(VM.bed, Math.floor(rearH / bedRowCount));
+  const bathW    = clp(Math.round(W * 0.20), 6, 9);
+  let   bathIdx  = 0, bedsLeft = beds;
 
-    if (hasBath && sliceW > bathW + 9) {
-      const bW = bathW;
-      rooms.push({ type: bedType,    x,          y: corrY + corrH, width: sliceW - bW, height: rearH });
-      rooms.push({ type: 'bathroom', x: x + sliceW - bW, y: corrY + corrH, width: bW, height: rearH });
+  for (let row = 0; row < bedRowCount; row++) {
+    const bedsThisRow = Math.min(2, bedsLeft);
+    const yRow = corrY + corrH + row * eachBedH;
+    const rowH = row === bedRowCount - 1 ? Math.max(VM.bed, H - yRow) : eachBedH;
+    const hasBath = bathIdx < baths;
+
+    if (bedsThisRow === 2) {
+      const sliceW = r2(W / 2);
+      const bedT1  = row === 0 ? 'master_bedroom' : 'bedroom';
+      if (hasBath && sliceW > bathW + 9) {
+        rooms.push({ type: bedT1,      x: 0,             y: yRow, width: sliceW - bathW, height: rowH });
+        rooms.push({ type: 'bathroom', x: sliceW-bathW,  y: yRow, width: bathW,          height: rowH });
+        bathIdx++;
+      } else {
+        rooms.push({ type: bedT1,     x: 0,       y: yRow, width: sliceW,     height: rowH });
+      }
+      rooms.push({ type: 'bedroom', x: sliceW, y: yRow, width: W - sliceW, height: rowH });
     } else {
-      rooms.push({ type: bedType, x, y: corrY + corrH, width: sliceW, height: rearH });
+      const bedType = row === 0 ? 'master_bedroom' : 'bedroom';
+      if (hasBath) {
+        const bedW = W - bathW;
+        rooms.push({ type: bedType,    x: 0,    y: yRow, width: bedW,  height: rowH });
+        rooms.push({ type: 'bathroom', x: bedW, y: yRow, width: bathW, height: rowH });
+        bathIdx++;
+      } else {
+        rooms.push({ type: bedType, x: 0, y: yRow, width: W, height: rowH });
+      }
     }
-    x += sliceW;
+    bedsLeft -= bedsThisRow;
   }
 
   if (hasStairs) rooms.push(_staircaseRoom(req.staircase_type, req.staircase_position, W, H));
@@ -636,71 +697,81 @@ function buildVastuCorner(W, H, req) {
   const baths     = clp(parseInt(req.bathrooms || 2), 0, beds);
   const hasStairs = (req.floors || 1) > 1;
 
-  if (W < 20 || H < 28) return buildSmartServiceFront(W, H, req);
+  if (W < 18 || H < 26) return buildSmartServiceFront(W, H, req);
 
   const rooms = [];
 
-  // ── FRONT ROW: balcony (left ~65%) + entry/foyer NE corner (right ~35%) ──
-  const balcH  = clp(Math.round(H * 0.10), VM.balc, 7);
+  // ── FRONT ROW: balcony NW (left 65%) + entry foyer NE (right 35%) ────────
+  const balcH  = clp(Math.round(H * 0.09), VM.balc, 7);
   const balcW  = r2(W * 0.65);
   const entryW = W - balcW;
-  const entryH = balcH;
-  rooms.push({ type: 'balcony', x: 0,     y: 0, width: balcW,  height: balcH  });
-  rooms.push({ type: 'entry',   x: balcW, y: 0, width: entryW, height: entryH });
+  rooms.push({ type: 'balcony', x: 0,     y: 0, width: balcW,  height: balcH });
+  rooms.push({ type: 'entry',   x: balcW, y: 0, width: entryW, height: balcH });
 
-  // ── MIDDLE ROW: living room (left ~60%) + kitchen SE corner (right ~40%) ──
-  const midH  = clp(Math.round(H * 0.38), VM.liv, Math.round(H * 0.45));
-  const livW  = r2(W * 0.60);
-  const kitW  = W - livW;
-  const kitH  = clp(Math.round(midH * 0.60), 8, midH);
-  const dinH  = midH - kitH;
+  // ── MIDDLE ROW: living (left col) + kitchen SE + dining SW stacked ────────
+  // Right column width must fit dining min area: dinW * dinH >= 80sqft
+  // Left column width must fit living min: livW >= 10, livH >= 10
+  const bedRowCount = Math.ceil(beds / 2);
+  const minBedH     = bedRowCount * VM.bed;
+  // Kitchen right column: kitW * kitH >= 60sqft; dining below kitchen
+  // Minimum right col height = kitH + dinH; minimum kitH = ceil(60/kitW), minimum dinH = ceil(80/kitW)
+  const kitW    = Math.max(8, Math.round(W * 0.38));
+  const livW    = W - kitW;
+  const minKitH = Math.ceil(60 / kitW);            // min kitchen height given this width
+  const minDinH = Math.ceil(80 / kitW);            // min dining height given this width
+  const minMidH = Math.max(VM.liv, minKitH + minDinH);
 
-  rooms.push({ type: 'living_room', x: 0,    y: balcH, width: livW, height: midH  });
-  rooms.push({ type: 'kitchen',     x: livW, y: balcH, width: kitW, height: kitH  });
-  rooms.push({ type: 'dining',      x: livW, y: balcH + kitH, width: kitW, height: dinH });
+  const [midH, rearH] = _zoneHeights(H - balcH, [
+    { min: minMidH,   shares: 1.8 },
+    { min: minBedH,   shares: 1.2 * bedRowCount },
+  ]);
 
-  // ── REAR ROW: master bed SW (left) + other bedrooms + baths ───────────────
-  const rearStartY = balcH + midH;
-  const rearH      = H - rearStartY;
-  const bathW      = clp(Math.round(W * 0.22), 6, 9);
-  const mbW        = clp(Math.round(W * 0.42), 10, Math.round(W * 0.55));
+  // Kitchen (SE) + dining below it in right column
+  const [kitH, dinH] = _zoneHeights(midH, [
+    { min: minKitH, shares: 1 },
+    { min: minDinH, shares: 1.2 },
+  ]);
 
-  // Master bedroom at SW (left side) — Vastu SW = stability
-  if (baths >= 1) {
-    rooms.push({ type: 'master_bedroom', x: 0,    y: rearStartY, width: mbW - bathW, height: rearH });
-    rooms.push({ type: 'bathroom',       x: mbW - bathW, y: rearStartY, width: bathW, height: rearH });
-  } else {
-    rooms.push({ type: 'master_bedroom', x: 0, y: rearStartY, width: mbW, height: rearH });
-  }
+  rooms.push({ type: 'living_room', x: 0,    y: balcH,          width: livW, height: midH  });
+  rooms.push({ type: 'kitchen',     x: livW, y: balcH,          width: kitW, height: kitH  });
+  rooms.push({ type: 'dining',      x: livW, y: balcH + kitH,   width: kitW, height: dinH  });
 
-  // Remaining bedrooms fill the right side of the rear row
-  const regBeds  = beds - 1;
-  const remW     = W - mbW;
-  if (regBeds > 0 && remW > 9) {
-    const eachW = Math.floor(remW / regBeds);
-    let bathIdx = baths >= 1 ? 1 : 0;
-    for (let i = 0; i < regBeds; i++) {
-      const isLast = i === regBeds - 1;
-      const bx     = mbW + i * eachW;
-      const bw     = isLast ? (W - bx) : eachW;
-      const hasBath= bathIdx < baths && bw > bathW + 6;
-      if (hasBath) {
-        rooms.push({ type: 'bedroom',   x: bx,          y: rearStartY, width: bw - bathW, height: rearH });
-        rooms.push({ type: 'bathroom',  x: bx + bw - bathW, y: rearStartY, width: bathW, height: rearH });
+  // ── REAR ROW: bedrooms in rows of 2 (Vastu: master SW = bottom-left) ─────
+  const rearStartY  = balcH + midH;
+  const eachBedH    = Math.max(VM.bed, Math.floor(rearH / bedRowCount));
+  const bathW       = clp(Math.round(W * 0.22), 6, 9);
+  let   bathIdx     = 0, bedsLeft = beds;
+
+  for (let row = 0; row < bedRowCount; row++) {
+    const bedsThisRow = Math.min(2, bedsLeft);
+    const yRow  = rearStartY + row * eachBedH;
+    const rowH  = row === bedRowCount - 1 ? Math.max(VM.bed, H - yRow) : eachBedH;
+    const hasBath = bathIdx < baths;
+
+    if (bedsThisRow === 2) {
+      // Master at LEFT (SW = Vastu ideal), second bedroom at RIGHT
+      const sliceW = r2(W / 2);
+      const bedT   = row === 0 ? 'master_bedroom' : 'bedroom';
+      if (hasBath && sliceW > bathW + 9) {
+        rooms.push({ type: bedT,       x: 0,            y: yRow, width: sliceW - bathW, height: rowH });
+        rooms.push({ type: 'bathroom', x: sliceW-bathW, y: yRow, width: bathW,          height: rowH });
         bathIdx++;
       } else {
-        rooms.push({ type: 'bedroom', x: bx, y: rearStartY, width: bw, height: rearH });
+        rooms.push({ type: bedT, x: 0, y: yRow, width: sliceW, height: rowH });
+      }
+      rooms.push({ type: 'bedroom', x: sliceW, y: yRow, width: W - sliceW, height: rowH });
+    } else {
+      const bedType = row === 0 ? 'master_bedroom' : 'bedroom';
+      if (hasBath) {
+        const bedW = W - bathW;
+        rooms.push({ type: bedType,    x: 0,    y: yRow, width: bedW,  height: rowH });
+        rooms.push({ type: 'bathroom', x: bedW, y: yRow, width: bathW, height: rowH });
+        bathIdx++;
+      } else {
+        rooms.push({ type: bedType, x: 0, y: yRow, width: W, height: rowH });
       }
     }
-  } else if (regBeds === 0) {
-    // only master — extend it to fill rest of rear row
-    const lastRoom = rooms[rooms.length - (baths >= 1 ? 1 : 0) - 1];
-    if (lastRoom) lastRoom.width = baths >= 1 ? mbW - bathW : W;
-    if (remW > 0) {
-      const wallFiller = rooms.find(r => r.type === 'bathroom' && r.y === rearStartY);
-      if (wallFiller) { /* already placed */ }
-      else rooms.push({ type: 'utility', x: mbW, y: rearStartY, width: remW, height: rearH });
-    }
+    bedsLeft -= bedsThisRow;
   }
 
   if (hasStairs) rooms.push(_staircaseRoom(req.staircase_type, req.staircase_position, W, H));
