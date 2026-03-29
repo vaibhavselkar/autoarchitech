@@ -179,36 +179,44 @@ on a ${plotWidth}ft × ${plotHeight}ft plot (buildable area: ${buildableW}ft × 
 facing ${facing} in ${city}.
 
 Your job: recommend 3 GENUINELY DIFFERENT floor plan strategies for this specific plot.
-Each must use a distinct spatial organization. Available strategies:
-  "linear"       — horizontal zone bands: front/middle/rear
-  "private-wing" — bedrooms in a private left column, public rooms on right
-  "service-front"— kitchen/dining at front near road, living opens to rear garden
+CRITICAL: Each plan MUST use a different style from the list below. Never repeat a style.
+
+Available strategies (pick exactly 3 DIFFERENT ones):
+  "linear"        — 3 horizontal bands: balcony front, living+service middle, bedrooms rear
+  "private-wing"  — LEFT column = all bedrooms, RIGHT column = living+dining+kitchen stacked
+  "service-front" — kitchen+dining at FRONT near road, large living room opens to REAR garden
+  "open-social"   — merged living+dining open zone (no partition), compact kitchen in corner, bedrooms cluster at rear
+  "spine"         — central corridor strip divides plan: public rooms front side, bedrooms rear side
+  "vastu-corner"  — Vastu quadrant placement: kitchen SE corner, master bed SW, entry NE, living NW
 
 For each plan, you decide:
-1. Which strategy fits best for ONE of the 3 plans (each plan must use a different strategy)
+1. Which strategy fits best (each plan MUST use a DIFFERENT strategy — no repeats)
 2. A creative, unique plan name (be specific — e.g. "Sunlit Vastu 2BHK" not "Plan A")
-3. The design theme (e.g. "Modern Minimalist", "Traditional Vastu", "Compact Contemporary")
+3. The design theme (e.g. "Modern Minimalist", "Traditional Vastu", "Open Contemporary")
 4. 2-3 sentences of engineer thinking explaining WHY this strategy suits this plot/orientation
-5. Whether it can be Vastu compliant
+5. Whether it is Vastu compliant
 6. Sunlight and ventilation strategies specific to this plot's orientation
 
-Consider the plot's ${facing} facing carefully — where does morning/evening sun come in?
-For a ${buildableH}ft deep × ${buildableW}ft wide buildable area, which layout avoids wasted space?
+Consider:
+- Plot facing: ${facing} — where does morning/evening sun enter?
+- Plot dimensions: ${buildableW}ft wide × ${buildableH}ft deep
+- Wide plots suit "private-wing" and "spine"; narrow plots suit "linear" and "open-social"
+- If aspect ratio is nearly square, "vastu-corner" works well
 
 Return ONLY this JSON (no markdown, no explanation):
 {
   "plans": [
     {
       "style": "linear",
-      "planName": "unique descriptive name",
+      "planName": "unique descriptive name e.g. 'Sunlit North 3BHK Classic'",
       "theme": "design theme",
-      "engineerThinking": "2-3 sentences: why this strategy, orientation logic, key trade-offs",
-      "vastuCompliant": true,
+      "engineerThinking": "2-3 sentences why this strategy, orientation reasoning",
+      "vastuCompliant": false,
       "sunlightStrategy": "specific to ${facing} facing and plot dimensions",
-      "ventilationStrategy": "cross-ventilation approach for ${buildableW}×${buildableH}ft buildable"
+      "ventilationStrategy": "cross-ventilation approach for ${buildableW}×${buildableH}ft"
     },
     {
-      "style": "private-wing",
+      "style": "open-social",
       "planName": "...",
       "theme": "...",
       "engineerThinking": "...",
@@ -217,11 +225,11 @@ Return ONLY this JSON (no markdown, no explanation):
       "ventilationStrategy": "..."
     },
     {
-      "style": "service-front",
+      "style": "vastu-corner",
       "planName": "...",
       "theme": "...",
       "engineerThinking": "...",
-      "vastuCompliant": false,
+      "vastuCompliant": true,
       "sunlightStrategy": "...",
       "ventilationStrategy": "..."
     }

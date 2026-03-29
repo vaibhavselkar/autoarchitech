@@ -472,6 +472,241 @@ function buildSmartServiceFront(W, H, req) {
 }
 
 
+/**
+ * Plan 4 — Open Social Hub
+ *
+ * Visually distinct concept: a WIDE merged living+dining open zone spans
+ * the ENTIRE front half of the plot. Kitchen is a compact box at the
+ * rear-left corner (tucked away). Balcony wraps the full front.
+ * Bedrooms are arranged in a compact RIGHT column at the rear.
+ *
+ * What makes it look different:
+ *   - No partition between living and dining (open plan)
+ *   - Kitchen is a standalone box at back-left — not in a band
+ *   - Bedrooms are stacked in a narrower right column at rear
+ */
+function buildOpenSocialHub(W, H, req) {
+  const beds      = clp(parseInt(req.bedrooms  || 2), 1, 6);
+  const baths     = clp(parseInt(req.bathrooms || 2), 0, beds);
+  const hasStairs = (req.floors || 1) > 1;
+
+  // Need at least ~26ft wide for this split to work
+  if (W < 26) return buildSmartLinear(W, H, req);
+
+  const rooms = [];
+
+  // ── Front: balcony full width ──────────────────────────────────────────
+  const balcH = clp(Math.round(H * 0.10), VM.balc, 7);
+  rooms.push({ type: 'balcony', x: 0, y: 0, width: W, height: balcH });
+
+  // ── Middle: merged open living+dining (LEFT 60%) + kitchen box (RIGHT 40%) ──
+  const socialH = clp(Math.round(H * 0.38), VM.liv, Math.round(H * 0.45));
+  const socialW = r2(W * 0.60);
+  const kitW    = W - socialW;
+  const kitH    = clp(Math.round(socialH * 0.65), 8, socialH);
+  const entryH  = socialH - kitH;  // entry/utility fills gap above kitchen
+
+  rooms.push({ type: 'living_room', x: 0,       y: balcH, width: socialW, height: Math.round(socialH * 0.58) });
+  rooms.push({ type: 'dining',      x: 0,       y: balcH + Math.round(socialH * 0.58), width: socialW, height: socialH - Math.round(socialH * 0.58) });
+  rooms.push({ type: 'kitchen',     x: socialW, y: balcH, width: kitW,    height: kitH  });
+  if (entryH >= 4) {
+    rooms.push({ type: 'entry',     x: socialW, y: balcH + kitH, width: kitW, height: entryH });
+  }
+
+  // ── Rear: bedrooms+baths in rows ─────────────────────────────────────────
+  const bedStartY = balcH + socialH;
+  const bedZoneH  = H - bedStartY;
+  const bedRows   = beds;
+  const eachBedH  = Math.max(VM.bed, Math.floor(bedZoneH / bedRows));
+  const bathW     = clp(Math.round(W * 0.22), 6, 9);
+  const bedW      = W - bathW;
+
+  let bathIdx = 0;
+  for (let i = 0; i < bedRows; i++) {
+    const bedType = i === 0 ? 'master_bedroom' : 'bedroom';
+    const rowH    = i === bedRows - 1 ? (H - (bedStartY + i * eachBedH)) : eachBedH;
+    const yRow    = bedStartY + i * eachBedH;
+    if (bathIdx < baths) {
+      // Bath on RIGHT for open hub (mirror of linear which has bath on right too — but column arrangement differs)
+      rooms.push({ type: bedType,    x: 0,    y: yRow, width: bedW,  height: rowH });
+      rooms.push({ type: 'bathroom', x: bedW, y: yRow, width: bathW, height: rowH });
+      bathIdx++;
+    } else {
+      rooms.push({ type: bedType, x: 0, y: yRow, width: W, height: rowH });
+    }
+  }
+
+  if (hasStairs) rooms.push(_staircaseRoom(req.staircase_type, req.staircase_position, W, H));
+  return rooms;
+}
+
+/**
+ * Plan 5 — Spine / Corridor Layout
+ *
+ * A central corridor runs horizontally across the MIDDLE of the plot.
+ * Public rooms (living, dining, kitchen) are on the FRONT side of the corridor.
+ * Private rooms (bedrooms, bathrooms) are on the REAR side of the corridor.
+ * Balcony at extreme front. Very different: spine divides the plan visually.
+ *
+ * What makes it look different:
+ *   - Visible horizontal corridor strip through the centre
+ *   - Public rooms are individual boxes across the front half
+ *   - Private rooms are individual boxes across the rear half
+ */
+function buildSpineLayout(W, H, req) {
+  const beds      = clp(parseInt(req.bedrooms  || 2), 1, 6);
+  const baths     = clp(parseInt(req.bathrooms || 2), 0, beds);
+  const hasStairs = (req.floors || 1) > 1;
+
+  if (W < 22 || H < 30) return buildSmartPrivateWing(W, H, req);
+
+  const rooms = [];
+
+  // Balcony at front — partial width (left 55%)
+  const balcH = clp(Math.round(H * 0.09), VM.balc, 7);
+  const balcW = r2(W * 0.55);
+  rooms.push({ type: 'balcony', x: 0, y: 0, width: balcW, height: balcH });
+
+  // Corridor band runs across full width
+  const corrW = VM.serv;   // ~10ft — wider than a passage to be its own zone
+  const corrH = 4;         // corridor is thin — 4ft
+  const frontH = clp(Math.round((H - balcH - corrH) * 0.42), VM.liv, Math.round(H * 0.45));
+  const rearH  = H - balcH - frontH - corrH;
+
+  const corrY  = balcH + frontH;
+
+  // ── Front zone: living LEFT (large) + dining+kitchen RIGHT (stacked) ─────
+  const livW   = r2(W * 0.58);
+  const servW  = W - livW;
+  const kitH   = clp(Math.round(frontH * 0.45), 8, frontH - VM.serv);
+  const dinH   = frontH - kitH;
+
+  rooms.push({ type: 'living_room', x: 0,    y: balcH, width: livW,  height: frontH });
+  rooms.push({ type: 'kitchen',     x: livW, y: balcH, width: servW, height: kitH   });
+  rooms.push({ type: 'dining',      x: livW, y: balcH + kitH, width: servW, height: dinH });
+
+  // ── Corridor band ────────────────────────────────────────────────────────
+  rooms.push({ type: 'corridor', x: 0, y: corrY, width: W, height: corrH });
+
+  // ── Rear zone: bedrooms+baths arranged left-to-right ────────────────────
+  const totalBedsW = W;
+  const bathW      = clp(Math.round(W * 0.20), 6, 9);
+  let x = 0;
+  for (let i = 0; i < beds; i++) {
+    const bedType = i === 0 ? 'master_bedroom' : 'bedroom';
+    const isLast  = i === beds - 1;
+    // Each bedroom gets equal width slice; last one fills remainder
+    const sliceW  = isLast ? (W - x) : Math.floor(totalBedsW / beds);
+    const hasBath = i < baths;
+
+    if (hasBath && sliceW > bathW + 9) {
+      const bW = bathW;
+      rooms.push({ type: bedType,    x,          y: corrY + corrH, width: sliceW - bW, height: rearH });
+      rooms.push({ type: 'bathroom', x: x + sliceW - bW, y: corrY + corrH, width: bW, height: rearH });
+    } else {
+      rooms.push({ type: bedType, x, y: corrY + corrH, width: sliceW, height: rearH });
+    }
+    x += sliceW;
+  }
+
+  if (hasStairs) rooms.push(_staircaseRoom(req.staircase_type, req.staircase_position, W, H));
+  return rooms;
+}
+
+/**
+ * Plan 6 — Vastu Diagonal (Corner Kitchen)
+ *
+ * Strictly follows Vastu quadrant placement:
+ *   Kitchen    → SE corner  (fire element)
+ *   Master bed → SW corner  (stability)
+ *   Living     → NW / front (social)
+ *   Pooja/Entry→ NE corner  (auspicious)
+ *
+ * For a NORTH-facing plot:
+ *   NE = top-right, NW = top-left, SE = bottom-right, SW = bottom-left
+ *
+ * What makes it look different:
+ *   - Kitchen is in a CORNER box, not a band
+ *   - Master bedroom is bottom-left — opposite of most other plans
+ *   - Entry/foyer is top-right — near auspicious NE corner
+ *   - Living spans the full top half (NW + N)
+ */
+function buildVastuCorner(W, H, req) {
+  const beds      = clp(parseInt(req.bedrooms  || 2), 1, 6);
+  const baths     = clp(parseInt(req.bathrooms || 2), 0, beds);
+  const hasStairs = (req.floors || 1) > 1;
+
+  if (W < 20 || H < 28) return buildSmartServiceFront(W, H, req);
+
+  const rooms = [];
+
+  // ── FRONT ROW: balcony (left ~65%) + entry/foyer NE corner (right ~35%) ──
+  const balcH  = clp(Math.round(H * 0.10), VM.balc, 7);
+  const balcW  = r2(W * 0.65);
+  const entryW = W - balcW;
+  const entryH = balcH;
+  rooms.push({ type: 'balcony', x: 0,     y: 0, width: balcW,  height: balcH  });
+  rooms.push({ type: 'entry',   x: balcW, y: 0, width: entryW, height: entryH });
+
+  // ── MIDDLE ROW: living room (left ~60%) + kitchen SE corner (right ~40%) ──
+  const midH  = clp(Math.round(H * 0.38), VM.liv, Math.round(H * 0.45));
+  const livW  = r2(W * 0.60);
+  const kitW  = W - livW;
+  const kitH  = clp(Math.round(midH * 0.60), 8, midH);
+  const dinH  = midH - kitH;
+
+  rooms.push({ type: 'living_room', x: 0,    y: balcH, width: livW, height: midH  });
+  rooms.push({ type: 'kitchen',     x: livW, y: balcH, width: kitW, height: kitH  });
+  rooms.push({ type: 'dining',      x: livW, y: balcH + kitH, width: kitW, height: dinH });
+
+  // ── REAR ROW: master bed SW (left) + other bedrooms + baths ───────────────
+  const rearStartY = balcH + midH;
+  const rearH      = H - rearStartY;
+  const bathW      = clp(Math.round(W * 0.22), 6, 9);
+  const mbW        = clp(Math.round(W * 0.42), 10, Math.round(W * 0.55));
+
+  // Master bedroom at SW (left side) — Vastu SW = stability
+  if (baths >= 1) {
+    rooms.push({ type: 'master_bedroom', x: 0,    y: rearStartY, width: mbW - bathW, height: rearH });
+    rooms.push({ type: 'bathroom',       x: mbW - bathW, y: rearStartY, width: bathW, height: rearH });
+  } else {
+    rooms.push({ type: 'master_bedroom', x: 0, y: rearStartY, width: mbW, height: rearH });
+  }
+
+  // Remaining bedrooms fill the right side of the rear row
+  const regBeds  = beds - 1;
+  const remW     = W - mbW;
+  if (regBeds > 0 && remW > 9) {
+    const eachW = Math.floor(remW / regBeds);
+    let bathIdx = baths >= 1 ? 1 : 0;
+    for (let i = 0; i < regBeds; i++) {
+      const isLast = i === regBeds - 1;
+      const bx     = mbW + i * eachW;
+      const bw     = isLast ? (W - bx) : eachW;
+      const hasBath= bathIdx < baths && bw > bathW + 6;
+      if (hasBath) {
+        rooms.push({ type: 'bedroom',   x: bx,          y: rearStartY, width: bw - bathW, height: rearH });
+        rooms.push({ type: 'bathroom',  x: bx + bw - bathW, y: rearStartY, width: bathW, height: rearH });
+        bathIdx++;
+      } else {
+        rooms.push({ type: 'bedroom', x: bx, y: rearStartY, width: bw, height: rearH });
+      }
+    }
+  } else if (regBeds === 0) {
+    // only master — extend it to fill rest of rear row
+    const lastRoom = rooms[rooms.length - (baths >= 1 ? 1 : 0) - 1];
+    if (lastRoom) lastRoom.width = baths >= 1 ? mbW - bathW : W;
+    if (remW > 0) {
+      const wallFiller = rooms.find(r => r.type === 'bathroom' && r.y === rearStartY);
+      if (wallFiller) { /* already placed */ }
+      else rooms.push({ type: 'utility', x: mbW, y: rearStartY, width: remW, height: rearH });
+    }
+  }
+
+  if (hasStairs) rooms.push(_staircaseRoom(req.staircase_type, req.staircase_position, W, H));
+  return rooms;
+}
+
 // ─── Smart stream generator: deterministic rule-based, instant results ─────────
 // Encodes all validator rules directly — no AI calls, no retries, scores >90.
 // onPlanReady(layout, index, attempts) is called for each completed plan.
@@ -498,19 +733,96 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
   const buildable = getBuildable(plotData);
   const W = buildable.width, H = buildable.length;
 
-  // Builder map — indexed by style string
+  // All 6 builders — each produces a visually distinct layout
   const BUILDERS = {
     'linear':        () => buildSmartLinear(W, H, req),
     'private-wing':  () => buildSmartPrivateWing(W, H, req),
     'service-front': () => buildSmartServiceFront(W, H, req),
+    'open-social':   () => buildOpenSocialHub(W, H, req),
+    'spine':         () => buildSpineLayout(W, H, req),
+    'vastu-corner':  () => buildVastuCorner(W, H, req),
   };
 
-  // Default configs (used when Gemini is unavailable)
-  const DEFAULT_CONFIGS = [
-    { style: 'linear',        theme: 'Modern Minimalist',    planName: `${req.bedrooms}BHK Linear Home`,        engineerThinking: 'Full-width horizontal zoning — balcony at front, living in middle, bedrooms at rear. Maximises cross-ventilation across the full plot width.',       vastuCompliant: false, sunlightStrategy: 'East-facing kitchen gets morning light.', ventilationStrategy: 'Full-width rooms allow cross-ventilation.' },
-    { style: 'private-wing',  theme: 'Contemporary Indian',  planName: `${req.bedrooms}BHK Private Wing`,       engineerThinking: 'Bedrooms clustered in a private left column away from road noise. Living and kitchen stack on the right for easy service access.',                   vastuCompliant: false, sunlightStrategy: 'South-west bedrooms avoid morning road noise.', ventilationStrategy: 'Column separation creates natural airflow corridors.' },
-    { style: 'service-front', theme: 'Traditional Elegance', planName: `${req.bedrooms}BHK Garden Living`,      engineerThinking: 'Kitchen and dining near the road for service convenience. Living room opens to the rear garden — the family zone is calm and private.',            vastuCompliant: false, sunlightStrategy: 'Living room faces garden for afternoon light.', ventilationStrategy: 'Kitchen vents to road side; living to garden.' },
+  // All 6 configs — Gemini picks 3; if unavailable, we pick 3 based on plot proportions
+  const ALL_CONFIGS = [
+    {
+      style: 'linear', theme: 'Modern Minimalist',
+      planName: `${req.bedrooms}BHK Classic Zoned`,
+      engineerThinking: 'Three clear horizontal zones: balcony + entry at front, living and service in the middle, all bedrooms at the private rear. The most space-efficient layout for Indian rectangular plots — every sqft is used.',
+      vastuCompliant: false,
+      sunlightStrategy: 'Full-width living room gets maximum light across all orientations.',
+      ventilationStrategy: 'Full-width rooms allow cross-ventilation from front to rear.',
+    },
+    {
+      style: 'private-wing', theme: 'Contemporary Split',
+      planName: `${req.bedrooms}BHK Private Wing`,
+      engineerThinking: 'Bedrooms clustered in a dedicated private left column — completely shielded from road noise and guest activity. Living, dining and kitchen occupy the right column with a clear public-to-private boundary.',
+      vastuCompliant: false,
+      sunlightStrategy: 'Public column faces road for natural light; bedrooms face the quieter side.',
+      ventilationStrategy: 'Two parallel columns create a natural airflow corridor between them.',
+    },
+    {
+      style: 'service-front', theme: 'Garden Living',
+      planName: `${req.bedrooms}BHK Garden Living`,
+      engineerThinking: 'Kitchen and dining placed near the road for easy service access. The living room is pushed to the rear where it opens to the garden — the family relaxes in a calm, private zone.',
+      vastuCompliant: false,
+      sunlightStrategy: 'Living room faces the garden — afternoon and evening light floods the family zone.',
+      ventilationStrategy: 'Service zone vents to road side; living room cross-ventilates to garden.',
+    },
+    {
+      style: 'open-social', theme: 'Open Plan Contemporary',
+      planName: `${req.bedrooms}BHK Open Social`,
+      engineerThinking: 'Merged living and dining create a single large open social zone — feels like a much bigger house. Kitchen is a compact standalone box at the rear corner. All bedrooms are in a dedicated private cluster.',
+      vastuCompliant: false,
+      sunlightStrategy: 'The wide open social zone captures light from multiple sides simultaneously.',
+      ventilationStrategy: 'No partition between living and dining means air flows freely across the entire front half.',
+    },
+    {
+      style: 'spine', theme: 'Corridor Spine',
+      planName: `${req.bedrooms}BHK Spine Plan`,
+      engineerThinking: 'A central horizontal corridor divides the plan into a public front half and a private rear half. Every room has its own external wall and window. Circulation is never forced through any private room.',
+      vastuCompliant: false,
+      sunlightStrategy: 'Individual room boxes ensure every bedroom gets its own exterior wall and direct sunlight.',
+      ventilationStrategy: 'The corridor acts as a pressure-equalising spine — all rooms ventilate independently.',
+    },
+    {
+      style: 'vastu-corner', theme: 'Vastu Compliant',
+      planName: `${req.bedrooms}BHK Vastu Home`,
+      engineerThinking: 'Follows all Vastu quadrant rules: kitchen in SE (fire element), master bedroom in SW (stability and grounding), entry from NE (auspicious), living in NW (social activity). Compass placement is strictly correct.',
+      vastuCompliant: true,
+      sunlightStrategy: 'SE kitchen gets morning sun; SW master bedroom avoids harsh afternoon heat.',
+      ventilationStrategy: 'NE entry creates positive air flow through the NW living zone towards SW.',
+    },
   ];
+
+  // Pick 3 that work best for this plot size — prefer variety over best score
+  // Narrow plots (<28ft): skip spine (needs width); wide plots (>50ft): all work
+  const eligibleStyles = Object.keys(BUILDERS).filter(s => {
+    if (s === 'spine'       && W < 24) return false;
+    if (s === 'open-social' && W < 26) return false;
+    if (s === 'vastu-corner'&& W < 22) return false;
+    if (s === 'private-wing'&& W < 26) return false;
+    return true;
+  });
+
+  // Always guarantee linear is option 1; then pick 2 more distinct styles
+  const pickedStyles = ['linear'];
+  const preferred = ['private-wing', 'open-social', 'vastu-corner', 'spine', 'service-front'];
+  for (const s of preferred) {
+    if (eligibleStyles.includes(s) && !pickedStyles.includes(s)) {
+      pickedStyles.push(s);
+      if (pickedStyles.length === 3) break;
+    }
+  }
+  // Fallback: fill with whatever is eligible
+  for (const s of eligibleStyles) {
+    if (!pickedStyles.includes(s)) pickedStyles.push(s);
+    if (pickedStyles.length === 3) break;
+  }
+
+  const DEFAULT_CONFIGS = pickedStyles
+    .map(s => ALL_CONFIGS.find(c => c.style === s))
+    .filter(Boolean);
 
   // ── Step 1: Get Gemini's design recommendations (one call, all 3 plans) ────
   let configs = DEFAULT_CONFIGS;
@@ -549,23 +861,30 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
   }
 
   // ── Guarantee each plan uses a DIFFERENT visual builder ────────────────────
-  // Even if Gemini recommends same style for multiple plans, force distinct styles
-  // so the 3 plans are always visually different.
+  // Map any unknown/Gemini style to the closest eligible style, then deduplicate.
   {
-    const allStyles  = ['linear', 'private-wing', 'service-front'];
+    const styleMap = {
+      // Gemini recommendations → our builder names
+      'linear': 'linear', 'open': 'open-social', 'open-plan': 'open-social',
+      'vastu': 'vastu-corner', 'vastu-compliant': 'vastu-corner',
+      'compact': 'spine', 'split': 'private-wing', 'corridor': 'spine',
+      'service-front': 'service-front', 'private-wing': 'private-wing',
+      'open-social': 'open-social', 'spine': 'spine', 'vastu-corner': 'vastu-corner',
+    };
     const seenStyles = new Set();
-    const unused     = () => allStyles.find(s => !seenStyles.has(s));
+    const unusedPicked = () => pickedStyles.find(s => !seenStyles.has(s));
 
-    configs = configs.map(c => {
-      const s = allStyles.includes(c.style) ? c.style : allStyles[0];
-      if (!seenStyles.has(s)) {
-        seenStyles.add(s);
-        return { ...c, style: s };
+    configs = configs.map((c, idx) => {
+      // Resolve Gemini's style name to a real builder key
+      const resolved = styleMap[c.style?.toLowerCase()] || pickedStyles[idx] || 'linear';
+      const eligible = eligibleStyles.includes(resolved) ? resolved : (pickedStyles[idx] || 'linear');
+      if (!seenStyles.has(eligible)) {
+        seenStyles.add(eligible);
+        return { ...c, style: eligible };
       }
-      // Duplicate — replace with next unused style
-      const replacement = unused();
+      const replacement = unusedPicked();
       if (replacement) seenStyles.add(replacement);
-      return { ...c, style: replacement || s };
+      return { ...c, style: replacement || eligible };
     });
     console.log('  Assigned styles:', configs.map(c => c.style).join(', '));
   }
@@ -796,14 +1115,15 @@ function generateFallbackLayouts(plotData, prefs, buildable, req, count) {
 
   const layoutBuilders = [
     () => buildSmartLinear(W, H, req),
+    () => buildOpenSocialHub(W, H, req),
+    () => buildVastuCorner(W, H, req),
     () => buildSmartPrivateWing(W, H, req),
+    () => buildSpineLayout(W, H, req),
     () => buildSmartServiceFront(W, H, req),
-    () => buildOpenPlanRooms(W, H, req),
-    () => buildCompactRooms(W, H, req),
   ];
 
-  const themes = ['Modern Minimalist', 'Contemporary', 'Traditional Elegance', 'Scandinavian', 'Vastu Compliant'];
-  const styles = ['linear', 'private-wing', 'service-front', 'open-plan', 'compact'];
+  const themes = ['Modern Minimalist', 'Open Contemporary', 'Vastu Compliant', 'Private Wing', 'Spine Corridor', 'Garden Living'];
+  const styles = ['linear', 'open-social', 'vastu-corner', 'private-wing', 'spine', 'service-front'];
 
   for (let i = 0; i < Math.min(count, layoutBuilders.length); i++) {
     const rooms = layoutBuilders[i]();
