@@ -2,10 +2,12 @@
 /**
  * geminiPrompt.js
  * Gemini acts as a licensed civil engineer.
- * It outputs band/col/sizeWeight decisions — no pixel coordinates.
+ * Uses few-shot learning: shows Gemini 5 perfect example plans
+ * before every request so it learns the correct spatial pattern.
  */
 
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenerativeAI }         = require('@google/generative-ai');
+const { buildFewShotSection }        = require('./examplePlans');
 
 const SYSTEM_PROMPT = `
 You are a licensed civil engineer and architect with 25 years of experience
@@ -25,13 +27,31 @@ When you design a floor plan you think in this order:
   STEP 3: Place service zones (kitchen, bath) away from road noise
   STEP 4: Ensure every bedroom has cross-ventilation
   STEP 5: Check all adjacency rules (bath NEVER touches kitchen or dining)
-  STEP 6: Verify every room meets NBC minimum size
+  STEP 6: Verify every room meets NBC minimum size using the minH/minW values
   STEP 7: Apply Vastu corrections if requested
 
 You respond ONLY with a valid JSON object.
 No markdown. No explanation outside the JSON.
 No code blocks. Pure JSON starting with { and ending with }.
 `.trim();
+
+// Minimum dimensions every room must meet — injected into the prompt
+const ROOM_MINIMUMS = `
+MANDATORY MINIMUM SIZES (never go below these):
+  living_room:     minH: 12,  minW: 12
+  master_bedroom:  minH: 12,  minW: 12
+  bedroom:         minH: 10,  minW: 10
+  kitchen:         minH: 10,  minW: 8
+  dining:          minH: 10,  minW: 10
+  bathroom:        minH: 7,   minW: 5
+  balcony:         minH: 5,   minW: 8
+  parking:         minH: 18,  minW: 9
+  corridor:        minH: 4,   minW: 3
+  entry:           minH: 4,   minW: 4
+
+You MUST output minH and minW for EVERY room.
+The layout engine uses these values directly to set room sizes.
+Never output a room with minH or minW below these values.`.trim();
 
 function buildPrompt(params) {
   const {
@@ -46,8 +66,25 @@ function buildPrompt(params) {
   const buildableW = plotWidth  - (setbacks.left  || 2) - (setbacks.right || 2);
   const buildableH = plotHeight - (setbacks.front || 3) - (setbacks.rear  || 3);
 
+  // Build the few-shot block — Gemini studies these before designing
+  const fewShot = buildFewShotSection();
+
   return `
-Design a floor plan for this plot:
+═══════════════════════════════════════════════
+STUDY THESE ${5} CORRECT EXAMPLES FIRST
+═══════════════════════════════════════════════
+Before designing anything, study these verified correct floor plans.
+Copy the EXACT same patterns for:
+  • bathroom placement (always different band OR different column from kitchen)
+  • kitchen platformWall vs doorWall (never the same wall)
+  • minH and minW values (always specified, never below mandatory minimums)
+  • sizeWeight values (bathroom=1, living=5, bedroom=4, kitchen=3, dining=3)
+
+${fewShot}
+
+═══════════════════════════════════════════════
+NOW DESIGN A NEW FLOOR PLAN FOR THIS PLOT
+═══════════════════════════════════════════════
 
 PLOT:
 - Total size: ${plotWidth}ft wide × ${plotHeight}ft deep
@@ -64,8 +101,10 @@ REQUIREMENTS:
 - Style: ${style}
 - Priorities: ${priorities.join(', ')}
 
+${ROOM_MINIMUMS}
+
 YOUR TASK:
-Design the room layout and return a JSON plan.
+Design the room layout following the same pattern as the examples above.
 For each room, decide:
   1. Which BAND it belongs to:
      band 1 = front zone (near road) — for parking, balcony, entry
@@ -77,26 +116,30 @@ For each room, decide:
   3. SIZE WEIGHT — relative size compared to other rooms in same band:
      living=5, bedroom=4, kitchen=3, dining=3, bathroom=1, corridor=1
   4. Which wall gets the WINDOW
-  5. Which wall gets the DOOR (must not be same as platform wall for kitchen)
-  6. Which wall has the PLATFORM (kitchen only)
+  5. Which wall gets the DOOR (must not be same as platformWall for kitchen)
+  6. Which wall has the PLATFORM (kitchen only — same wall as windowWall)
+  7. minH — minimum height in feet (use values from MANDATORY MINIMUMS above)
+  8. minW — minimum width in feet (use values from MANDATORY MINIMUMS above)
 
-CRITICAL RULES:
-- Bathroom NEVER shares a wall with kitchen — place in different bands/cols
+CRITICAL RULES (same as in the examples):
+- Bathroom NEVER shares a wall with kitchen:
+    • If bathroom and kitchen are in the SAME column, they must be in DIFFERENT bands
+    • If in the SAME band, they must be in DIFFERENT columns
+    • Safest: place all bathrooms in band 3, kitchen in band 2
 - Kitchen MUST be adjacent to dining room (same band, neighboring cols)
 - Master bedroom MUST be in band 3 — away from road noise
 - Parking MUST be in band 1 — near gate
 - Bathroom must be adjacent to at least one bedroom
-- Kitchen window wall = also the platform wall (light while cooking)
-- Kitchen door wall = opposite to platform wall
-- Every bedroom must have a window
-- Bathroom can have 1 door only
-- If Vastu style: kitchen in SE, master bed in SW, living in NW
+- Kitchen platformWall = windowWall (light while cooking)
+- Kitchen doorWall = OPPOSITE wall to platformWall (never same wall)
+- Every bedroom must have a windowWall
+- If Vastu style: kitchen in SE, master bed in SW, living in NW or NE
 
 Return ONLY this JSON structure (no markdown, no explanation):
 
 {
-  "planName": "short descriptive name e.g. 'Compact Vastu 3BHK'",
-  "layoutType": "linear|split|compact|open|courtyard",
+  "planName": "short descriptive name e.g. 'Sunlit Vastu 3BHK'",
+  "layoutType": "linear|split|compact|open|courtyard|vastu",
   "engineerThinking": "3-4 sentences explaining key design decisions and why",
   "vastuCompliant": true or false,
   "sunlightStrategy": "one sentence about natural light maximization",
@@ -110,10 +153,12 @@ Return ONLY this JSON structure (no markdown, no explanation):
       "col": 1,
       "colSpan": 1,
       "sizeWeight": 5,
+      "minH": 12,
+      "minW": 12,
       "windowWall": "north|south|east|west|none",
       "doorWall": "north|south|east|west",
       "platformWall": "north|south|east|west|none",
-      "notes": "any special note about this room placement"
+      "notes": "why this room is here"
     }
   ]
 }
@@ -154,7 +199,7 @@ async function callGemini(params) {
  *
  * Asks Gemini to DECIDE which 3 layout strategies work best for this
  * specific plot and requirements. The physical room placement is then
- * handled by the proven smart builders — Gemini provides the DESIGN BRAIN.
+ * handled by callGemini() — Gemini provides the DESIGN BRAIN.
  *
  * Returns: { plans: [{ style, planName, theme, engineerThinking,
  *                       vastuCompliant, sunlightStrategy, ventilationStrategy }, ...] }
@@ -186,7 +231,7 @@ Each must use a distinct spatial organization. Available strategies:
 
 For each plan, you decide:
 1. Which strategy fits best for ONE of the 3 plans (each plan must use a different strategy)
-2. A creative, unique plan name (be specific, not generic — e.g. "Sunlit Vastu 2BHK" not "Plan A")
+2. A creative, unique plan name (be specific — e.g. "Sunlit Vastu 2BHK" not "Plan A")
 3. The design theme (e.g. "Modern Minimalist", "Traditional Vastu", "Compact Contemporary")
 4. 2-3 sentences of engineer thinking explaining WHY this strategy suits this plot/orientation
 5. Whether it can be Vastu compliant

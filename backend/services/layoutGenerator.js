@@ -703,6 +703,49 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
 
     const score = layout.validation?.score ?? 0;
     console.log(`  Plan ${i + 1} (${style}) [${aiSource}]: "${cfg.planName || cfg.theme}" score=${score}`);
+
+    // ── Feedback loop: save high-scoring Gemini plans to grow the example library ──
+    // Only saves plans Gemini actually designed (not smart-builder fallbacks).
+    if (aiSource === 'gemini-room-design' && score >= 85) {
+      try {
+        const { saveGoodPlan } = require('../src/ai/exampleCollector');
+        const geminiInput = {
+          plotWidth:  plotData.width,
+          plotHeight: plotData.length,
+          facing:     (plotData.facing || 'NORTH').toUpperCase(),
+          bedrooms:   req.bedrooms,
+          bathrooms:  req.bathrooms,
+          style:      cfg.theme || style,
+        };
+        const geminiPlan = {
+          planName:            layout.planName,
+          layoutType:          style,
+          engineerThinking:    layout.engineerThinking,
+          vastuCompliant:      layout.vastuCompliant,
+          sunlightStrategy:    layout.sunlightStrategy,
+          ventilationStrategy: layout.ventilationStrategy,
+          rooms: rooms.map(r => ({
+            type:         r.type,
+            band:         r.band         || (r.y < buildableH * 0.33 ? 1 : r.y < buildableH * 0.66 ? 2 : 3),
+            col:          r.col          || 2,
+            colSpan:      r.colSpan      || 1,
+            sizeWeight:   r.sizeWeight   || 3,
+            minH:         r.minH         || r.height,
+            minW:         r.minW         || r.width,
+            windowWall:   r.windowWall   || 'south',
+            doorWall:     r.doorWall     || 'north',
+            platformWall: r.platformWall || 'none',
+          })),
+        };
+        // Fire-and-forget — never block plan delivery
+        saveGoodPlan(geminiInput, geminiPlan, score).catch(err =>
+          console.warn('  [exampleCollector] Save failed:', err.message)
+        );
+      } catch (err) {
+        console.warn('  [exampleCollector] Save failed:', err.message);
+      }
+    }
+
     await onPlanReady(layout, i, 0);
   }
 }
