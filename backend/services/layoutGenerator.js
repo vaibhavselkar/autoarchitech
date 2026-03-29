@@ -688,14 +688,19 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
       description: cfg.planName || `${req.bedrooms}BHK ${style} plan`,
     }, i);
 
-    // ── D2: Recovery — if score < 65, try smart builders (never reuse another plan's style) ──
-    if ((layout.validation?.score ?? 0) < 65) {
-      const candidates = ['private-wing', 'linear', 'service-front']
-        .filter(s => s !== style && !assignedStyles.slice(0, i).includes(s) && !assignedStyles.slice(i + 1).includes(s));
+    // ── D2: Recovery — if score < 80, try every smart builder and keep the best ──
+    if ((layout.validation?.score ?? 0) < 80) {
+      // Always try ALL three builders — pick globally best, regardless of assigned style
+      const allBuilderKeys = ['private-wing', 'linear', 'service-front'];
       let bestScore = layout.validation?.score ?? 0;
-      for (const candidate of candidates) {
+      let bestLayout = layout;
+      let bestSource = aiSource;
+
+      for (const candidate of allBuilderKeys) {
         const fbRooms = BUILDERS[candidate]();
         resolveOverlaps(fbRooms, buildable);
+        trimOverlaps(fbRooms, buildable);
+        fillGaps(fbRooms, buildable);
         const fbLayout = buildVariationFromAIRooms(plotData, prefs, buildable, {
           rooms: fbRooms,
           designTheme: cfg.theme || candidate,
@@ -704,11 +709,31 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
         }, i);
         const fbScore = fbLayout.validation?.score ?? 0;
         if (fbScore > bestScore) {
-          bestScore = fbScore;
-          layout    = fbLayout;
-          aiSource  = `smart-builder-recovery(${candidate})`;
+          bestScore  = fbScore;
+          bestLayout = fbLayout;
+          bestSource = `smart-builder-recovery(${candidate})`;
         }
-        if (bestScore >= 75) break;
+        if (bestScore >= 80) break;
+      }
+
+      layout   = bestLayout;
+      aiSource = bestSource;
+
+      // ── D3: autoFix pass — squeeze out last points if still below 80 ──
+      if ((layout.validation?.score ?? 0) < 80) {
+        const errs = layout.validation?.errors || [];
+        if (errs.length > 0) {
+          const fixed = autoFix(layout, errs);
+          if (fixed) {
+            const fixedValidation = validatePlan(fixed.plan);
+            if (fixedValidation.score > (layout.validation?.score ?? 0)) {
+              layout.rooms      = fixed.plan.rooms;
+              layout.validation = fixedValidation;
+              aiSource += '+autofix';
+              console.log(`  Plan ${i + 1}: autoFix boosted score to ${fixedValidation.score}`);
+            }
+          }
+        }
       }
     }
 
@@ -795,13 +820,36 @@ function generateFallbackLayouts(plotData, prefs, buildable, req, count) {
   for (let i = 0; i < Math.min(count, layoutBuilders.length); i++) {
     const rooms = layoutBuilders[i]();
     resolveOverlaps(rooms, buildable);
+    trimOverlaps(rooms, buildable);
+    fillGaps(rooms, buildable);
     const aiData = {
       rooms,
       designTheme: themes[i],
       layoutStyle: styles[i],
       description: `Fallback ${styles[i]} plan`,
     };
-    results.push(buildVariationFromAIRooms(plotData, prefs, buildable, aiData, i));
+    let layout = buildVariationFromAIRooms(plotData, prefs, buildable, aiData, i);
+
+    // Guarantee ≥80 — try other builders if this one scored poorly
+    if ((layout.validation?.score ?? 0) < 80) {
+      for (let j = 0; j < layoutBuilders.length; j++) {
+        if (j === i) continue;
+        const fbRooms = layoutBuilders[j]();
+        resolveOverlaps(fbRooms, buildable);
+        trimOverlaps(fbRooms, buildable);
+        fillGaps(fbRooms, buildable);
+        const fbLayout = buildVariationFromAIRooms(plotData, prefs, buildable, {
+          rooms: fbRooms, designTheme: themes[j], layoutStyle: styles[j],
+          description: `Fallback ${styles[j]} plan`,
+        }, i);
+        if ((fbLayout.validation?.score ?? 0) > (layout.validation?.score ?? 0)) {
+          layout = fbLayout;
+        }
+        if ((layout.validation?.score ?? 0) >= 80) break;
+      }
+    }
+
+    results.push(layout);
   }
 
   if (results.length === 0) throw new Error('Could not generate any valid floor plan. Please adjust your plot dimensions or requirements.');
