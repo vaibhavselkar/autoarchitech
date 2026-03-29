@@ -10,6 +10,7 @@ import ExportPage from './pages/ExportPage';
 import AuthPage from './pages/AuthPage';
 import Dashboard from './pages/Dashboard';
 import LandingPage from './pages/LandingPage';
+import AdminRules from './pages/AdminRules';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 // Show landing page for guests, redirect logged-in users to app
@@ -60,6 +61,7 @@ function App() {
               <Route path="results" element={<PlanResults />} />
               <Route path="editor/:planId" element={<PlanEditor />} />
               <Route path="export/:planId" element={<ExportPage />} />
+              <Route path="admin/rules" element={<AdminRules />} />
             </Route>
 
             {/* Catch all */}

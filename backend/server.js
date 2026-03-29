@@ -4,9 +4,10 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 
 // Import routes
-const planRoutes = require('./routes/plans');
-const authRoutes = require('./routes/auth');
-const aiRoutes = require('./routes/ai');
+const planRoutes  = require('./routes/plans');
+const authRoutes  = require('./routes/auth');
+const aiRoutes    = require('./routes/ai');
+const adminRoutes = require('./routes/admin');
 
 // Load environment variables
 dotenv.config();
@@ -73,9 +74,10 @@ app.use('/api', async (req, res, next) => {
 });
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/api/auth', authRoutes);
+app.use('/api/auth',  authRoutes);
 app.use('/api/plans', planRoutes);
-app.use('/api/ai', aiRoutes);
+app.use('/api/ai',    aiRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'AutoArchitect Backend is running', timestamp: new Date().toISOString() });

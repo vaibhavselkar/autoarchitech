@@ -48,6 +48,11 @@ const userSchema = new mongoose.Schema({
       kitchen: { type: Number, default: 1 }
     }
   },
+  role: {
+    type: String,
+    enum: ['user', 'admin'],
+    default: 'user',
+  },
   createdAt: {
     type: Date,
     default: Date.now

@@ -49,7 +49,8 @@ router.post('/register', async (req, res) => {
         user: {
           id: user._id,
           name: user.name,
-          email: user.email
+          email: user.email,
+          role: user.role,
         }
       }
     });
@@ -105,7 +106,8 @@ router.post('/login', async (req, res) => {
         user: {
           id: user._id,
           name: user.name,
-          email: user.email
+          email: user.email,
+          role: user.role,
         }
       }
     });
@@ -207,7 +209,7 @@ router.post('/google', async (req, res) => {
       message: 'Google login successful',
       data: {
         token,
-        user: { id: user._id, name: user.name, email: user.email, profilePicture: user.profilePicture },
+        user: { id: user._id, name: user.name, email: user.email, role: user.role, profilePicture: user.profilePicture },
       },
     });
   } catch (error) {

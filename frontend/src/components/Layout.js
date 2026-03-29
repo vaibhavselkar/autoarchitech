@@ -11,6 +11,7 @@ const Layout = () => {
     { name: 'Dashboard', href: '/dashboard', icon: '📊' },
     { name: 'Results', href: '/results', icon: '📋' },
     { name: 'Export', href: '/export', icon: '📤' },
+    ...(user?.role === 'admin' ? [{ name: 'Rules', href: '/admin/rules', icon: '⚙️' }] : []),
   ];
 
   const isActive = (path) => {
