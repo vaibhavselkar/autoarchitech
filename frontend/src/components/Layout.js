@@ -1,4 +1,3 @@
-import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -11,7 +10,10 @@ const Layout = () => {
     { name: 'Dashboard', href: '/dashboard', icon: '📊' },
     { name: 'Results', href: '/results', icon: '📋' },
     { name: 'Export', href: '/export', icon: '📤' },
-    ...(user?.role === 'admin' ? [{ name: 'Rules', href: '/admin/rules', icon: '⚙️' }] : []),
+    ...(user?.role === 'admin' ? [
+      { name: 'Rules',   href: '/admin/rules', icon: '⚙️' },
+      { name: 'AI Test', href: '/ai-tester',   icon: '🤖' },
+    ] : []),
   ];
 
   const isActive = (path) => {

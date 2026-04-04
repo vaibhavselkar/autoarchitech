@@ -2,6 +2,8 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const Plan = require('../models/Plan');
 const geminiService = require('../services/geminiService');
+const modelService = require('../services/modelService');
+const axios = require('axios');
 
 const router = express.Router();
 
@@ -296,6 +298,280 @@ router.get('/design-trends', authMiddleware, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to get design trends',
+      error: error.message
+    });
+  }
+});
+
+// ==========================================
+// AI Model-Based Floor Plan Generation Endpoints
+// ==========================================
+
+// Generate floor plan using AI models (HouseDiffusion, CE2EPlan, Graph2Plan)
+router.post('/generate-floorplan', authMiddleware, async (req, res) => {
+  try {
+    const { 
+      plotWidth, 
+      plotDepth, 
+      rooms, 
+      vastuPreferences,
+      model = 'ce2eplan' 
+    } = req.body;
+
+    if (!plotWidth || !plotDepth) {
+      return res.status(400).json({
+        success: false,
+        message: 'Plot dimensions (width and depth) are required'
+      });
+    }
+
+    const requirements = {
+      plotWidth,
+      plotDepth,
+      rooms: rooms || [],
+      vastuPreferences: vastuPreferences || {}
+    };
+
+    // Generate floor plan using the Python Flask service
+    const flaskUrl = process.env.PYTHON_MODEL_SERVICE_URL || 'http://localhost:5000';
+    
+    console.log(`Calling Flask service at: ${flaskUrl}/generate`);
+    console.log(`Request body:`, { plot_width: plotWidth, plot_depth: plotDepth, model: model });
+    
+    let result;
+    try {
+      const response = await axios.post(`${flaskUrl}/generate`, {
+        plot_width: plotWidth,
+        plot_depth: plotDepth,
+        model: model,
+        vastu_preferences: vastuPreferences
+      }, {
+        timeout: 30000,
+        headers: { 'Content-Type': 'application/json' }
+      });
+      console.log(`Flask response:`, response.status, response.data?.metrics);
+      result = {
+        success: true,
+        data: response.data,
+        model: model,
+        generation_time: response.data.metrics?.generation_time_seconds || 0
+      };
+    } catch (error) {
+      console.error('Flask service error:', error.message);
+      if (error.response) {
+        console.error('Error response:', error.response.status, error.response.data);
+      }
+      return res.status(500).json({
+        success: false,
+        message: `AI model service unavailable: ${error.message}. Make sure Flask is running on port 5000.`,
+        error: error.message
+      });
+    }
+
+    // Analyze Vastu compliance
+    const vastuAnalysis = modelService.analyzeVastuCompliance(result.data);
+
+    res.json({
+      success: true,
+      message: `Floor plan generated using ${model}`,
+      data: {
+        floorplan: result.data,
+        model: model,
+        generation_time: result.generation_time,
+        vastu_compliance: vastuAnalysis,
+        fallback_used: result.fallback || false
+      }
+    });
+
+  } catch (error) {
+    console.error('Generate floor plan error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate floor plan',
+      error: error.message
+    });
+  }
+});
+
+// Compare all available AI models for the same requirements
+router.post('/compare-models', authMiddleware, async (req, res) => {
+  try {
+    const { plotWidth, plotDepth, rooms, vastuPreferences } = req.body;
+
+    if (!plotWidth || !plotDepth) {
+      return res.status(400).json({
+        success: false,
+        message: 'Plot dimensions (width and depth) are required'
+      });
+    }
+
+    const requirements = {
+      plotWidth,
+      plotDepth,
+      rooms: rooms || [],
+      vastuPreferences: vastuPreferences || {}
+    };
+
+    // Compare all models
+    const comparison = await modelService.compareModels(requirements);
+
+    res.json({
+      success: true,
+      message: 'Model comparison complete',
+      data: comparison
+    });
+
+  } catch (error) {
+    console.error('Compare models error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to compare models',
+      error: error.message
+    });
+  }
+});
+
+// Analyze Vastu compliance of a floor plan
+router.post('/analyze-vastu', authMiddleware, async (req, res) => {
+  try {
+    const { floorplan } = req.body;
+
+    if (!floorplan) {
+      return res.status(400).json({
+        success: false,
+        message: 'Floor plan data is required'
+      });
+    }
+
+    const vastuAnalysis = modelService.analyzeVastuCompliance(floorplan);
+
+    res.json({
+      success: true,
+      message: 'Vastu compliance analysis complete',
+      data: vastuAnalysis
+    });
+
+  } catch (error) {
+    console.error('Analyze Vastu error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to analyze Vastu compliance',
+      error: error.message
+    });
+  }
+});
+
+// Get available AI models and their characteristics
+router.get('/available-models', authMiddleware, async (req, res) => {
+  try {
+    const models = [
+      {
+        id: 'housediffusion',
+        name: 'HouseDiffusion',
+        description: 'Vector floorplan generation via diffusion model',
+        paper: 'HouseDiffusion: Vector Floorplan Generation via a Diffusion Model (2022)',
+        strengths: ['High quality room dimensions', 'Good for varied layouts'],
+        weaknesses: ['Lower Vastu compliance', 'Slower generation'],
+        best_for: 'High-quality architectural designs'
+      },
+      {
+        id: 'ce2eplan',
+        name: 'CE2EPlan (HouseGAN++)',
+        description: 'End-to-end floorplan generation using GANs',
+        paper: 'HouseGAN++: Probabilistic Typo-Graphical Floorplan Generation',
+        strengths: ['Fastest generation', 'Highest space efficiency', 'Best overall score'],
+        weaknesses: ['Room sizes can be larger than ideal'],
+        best_for: 'Quick iterations and space-efficient designs'
+      },
+      {
+        id: 'graph2plan',
+        name: 'Graph2Plan',
+        description: 'Floorplan generation from layout graphs',
+        paper: 'Graph2Plan: Learning Floorplan Generation from Layout Graphs (SIGGRAPH 2020)',
+        strengths: ['Graph-based constraints', 'Good for structured layouts'],
+        weaknesses: ['Slowest generation', 'Requires more input specification'],
+        best_for: 'Constraint-based design exploration'
+      }
+    ];
+
+    res.json({
+      success: true,
+      data: {
+        models,
+        recommended: 'ce2eplan',
+        note: 'All models benefit from Vastu-compliant fine-tuning for Indian requirements'
+      }
+    });
+
+  } catch (error) {
+    console.error('Get available models error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get available models',
+      error: error.message
+    });
+  }
+});
+
+// Save generated floor plan as a new plan
+router.post('/save-generated-plan', authMiddleware, async (req, res) => {
+  try {
+    const { 
+      title, 
+      description, 
+      floorplan, 
+      requirements,
+      model 
+    } = req.body;
+
+    if (!floorplan) {
+      return res.status(400).json({
+        success: false,
+        message: 'Floor plan data is required'
+      });
+    }
+
+    // Convert to standard format
+    const standardFormat = modelService.convertToStandardFormat(floorplan);
+
+    // Create new plan
+    const plan = new Plan({
+      userId: req.userId,
+      title: title || `AI Generated Plan (${model})`,
+      description: description || `Generated using ${model} AI model`,
+      plotDimensions: {
+        width: floorplan.input?.boundary?.width || 30,
+        depth: floorplan.input?.boundary?.depth || 50,
+        unit: 'feet'
+      },
+      requirements: requirements || {},
+      layoutJson: {
+        rooms: standardFormat.rooms,
+        doors: standardFormat.doors,
+        windows: standardFormat.windows,
+        metadata: {
+          ...standardFormat.metadata,
+          generator: model,
+          aiGenerated: true,
+          generationDate: new Date().toISOString()
+        }
+      },
+      status: 'draft'
+    });
+
+    await plan.save();
+
+    res.json({
+      success: true,
+      message: 'Floor plan saved successfully',
+      data: { plan }
+    });
+
+  } catch (error) {
+    console.error('Save generated plan error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save floor plan',
       error: error.message
     });
   }

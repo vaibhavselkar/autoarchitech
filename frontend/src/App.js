@@ -11,6 +11,7 @@ import AuthPage from './pages/AuthPage';
 import Dashboard from './pages/Dashboard';
 import LandingPage from './pages/LandingPage';
 import AdminRules from './pages/AdminRules';
+import AIModelTester from './components/AIModelTester';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 // Show landing page for guests, redirect logged-in users to app
@@ -62,6 +63,7 @@ function App() {
               <Route path="editor/:planId" element={<PlanEditor />} />
               <Route path="export/:planId" element={<ExportPage />} />
               <Route path="admin/rules" element={<AdminRules />} />
+              <Route path="ai-tester" element={<AIModelTester />} />
             </Route>
 
             {/* Catch all */}
