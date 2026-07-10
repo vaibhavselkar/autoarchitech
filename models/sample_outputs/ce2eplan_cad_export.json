@@ -1,0 +1,157 @@
+{
+  "drawing_name": "floorplan_ce2eplan_30x50",
+  "units": "feet",
+  "boundary": {
+    "width": 30,
+    "depth": 50
+  },
+  "entities": [
+    {
+      "type": "LINE",
+      "start": [
+        0,
+        0
+      ],
+      "end": [
+        30,
+        0
+      ]
+    },
+    {
+      "type": "LINE",
+      "start": [
+        30,
+        0
+      ],
+      "end": [
+        30,
+        50
+      ]
+    },
+    {
+      "type": "LINE",
+      "start": [
+        30,
+        50
+      ],
+      "end": [
+        0,
+        50
+      ]
+    },
+    {
+      "type": "LINE",
+      "start": [
+        0,
+        50
+      ],
+      "end": [
+        0,
+        0
+      ]
+    },
+    {
+      "type": "LINE",
+      "start": [
+        18,
+        0
+      ],
+      "end": [
+        18,
+        22
+      ]
+    },
+    {
+      "type": "LINE",
+      "start": [
+        0,
+        22
+      ],
+      "end": [
+        18,
+        22
+      ]
+    },
+    {
+      "type": "LINE",
+      "start": [
+        18,
+        18
+      ],
+      "end": [
+        30,
+        18
+      ]
+    },
+    {
+      "type": "LINE",
+      "start": [
+        0,
+        38
+      ],
+      "end": [
+        12,
+        38
+      ]
+    },
+    {
+      "type": "LINE",
+      "start": [
+        16,
+        32
+      ],
+      "end": [
+        26,
+        32
+      ]
+    },
+    {
+      "type": "TEXT",
+      "position": [
+        9,
+        11
+      ],
+      "text": "living_room\n396 sqft"
+    },
+    {
+      "type": "TEXT",
+      "position": [
+        24,
+        9
+      ],
+      "text": "kitchen\n216 sqft"
+    },
+    {
+      "type": "TEXT",
+      "position": [
+        8,
+        30
+      ],
+      "text": "master_bedroom\n256 sqft"
+    },
+    {
+      "type": "TEXT",
+      "position": [
+        23,
+        25
+      ],
+      "text": "bedroom\n196 sqft"
+    },
+    {
+      "type": "TEXT",
+      "position": [
+        6,
+        43
+      ],
+      "text": "bathroom\n144 sqft"
+    },
+    {
+      "type": "TEXT",
+      "position": [
+        21,
+        37
+      ],
+      "text": "bathroom\n100 sqft"
+    }
+  ]
+}

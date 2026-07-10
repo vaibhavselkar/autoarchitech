@@ -1,0 +1,96 @@
+{
+    "model": "HouseDiffusion",
+    "input": {
+        "boundary": {"width": 30, "depth": 50},
+        "unit": "feet"
+    },
+    "output": {
+        "rooms": [
+            {
+                "id": 1,
+                "type": "living_room",
+                "type_id": 1,
+                "bbox": {"x1": 0, "y1": 0, "x2": 15, "y2": 20},
+                "center": [7.5, 10],
+                "area_sqft": 300,
+                "polygon": [[0, 0], [15, 0], [15, 20], [0, 20]]
+            },
+            {
+                "id": 2,
+                "type": "kitchen",
+                "type_id": 3,
+                "bbox": {"x1": 15, "y1": 0, "x2": 30, "y2": 15},
+                "center": [22.5, 7.5],
+                "area_sqft": 225,
+                "polygon": [[15, 0], [30, 0], [30, 15], [15, 15]]
+            },
+            {
+                "id": 3,
+                "type": "master_bedroom",
+                "type_id": 2,
+                "bbox": {"x1": 0, "y1": 20, "x2": 15, "y2": 35},
+                "center": [7.5, 27.5],
+                "area_sqft": 225,
+                "polygon": [[0, 20], [15, 20], [15, 35], [0, 35]]
+            },
+            {
+                "id": 4,
+                "type": "bedroom",
+                "type_id": 2,
+                "bbox": {"x1": 15, "y1": 15, "x2": 30, "y2": 30},
+                "center": [22.5, 22.5],
+                "area_sqft": 225,
+                "polygon": [[15, 15], [30, 15], [30, 30], [15, 30]]
+            },
+            {
+                "id": 5,
+                "type": "bathroom",
+                "type_id": 5,
+                "bbox": {"x1": 0, "y1": 35, "x2": 10, "y2": 45},
+                "center": [5, 40],
+                "area_sqft": 100,
+                "polygon": [[0, 35], [10, 35], [10, 45], [0, 45]]
+            },
+            {
+                "id": 6,
+                "type": "bathroom",
+                "type_id": 5,
+                "bbox": {"x1": 15, "y1": 30, "x2": 25, "y2": 40},
+                "center": [20, 35],
+                "area_sqft": 100,
+                "polygon": [[15, 30], [25, 30], [25, 40], [15, 40]]
+            }
+        ],
+        "doors": [
+            {"from_room": 1, "to_room": 2, "position": [15, 10], "width": 3},
+            {"from_room": 1, "to_room": 3, "position": [7.5, 20], "width": 3},
+            {"from_room": 2, "to_room": 4, "position": [22.5, 15], "width": 3},
+            {"from_room": 3, "to_room": 5, "position": [5, 35], "width": 2.5},
+            {"from_room": 4, "to_room": 6, "position": [20, 30], "width": 2.5}
+        ],
+        "windows": [
+            {"room": 1, "wall": "south", "position": [7.5, 0]},
+            {"room": 2, "wall": "east", "position": [30, 7.5]},
+            {"room": 3, "wall": "west", "position": [0, 27.5]},
+            {"room": 4, "wall": "east", "position": [30, 22.5]}
+        ]
+    },
+    "metrics": {
+        "generation_time_seconds": 2.3,
+        "total_area_sqft": 1275,
+        "efficiency": 0.85,
+        "room_count": 6,
+        "fid_score": 12.5
+    },
+    "wall_coordinates": [
+        {"start": [0, 0], "end": [30, 0]},
+        {"start": [30, 0], "end": [30, 50]},
+        {"start": [30, 50], "end": [0, 50]},
+        {"start": [0, 50], "end": [0, 0]},
+        {"start": [15, 0], "end": [15, 20]},
+        {"start": [0, 20], "end": [15, 20]},
+        {"start": [15, 15], "end": [30, 15]},
+        {"start": [0, 35], "end": [10, 35]},
+        {"start": [15, 30], "end": [25, 30]}
+    ]
+}

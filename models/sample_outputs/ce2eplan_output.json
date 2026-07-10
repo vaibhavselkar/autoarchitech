@@ -1,0 +1,119 @@
+{
+    "model": "CE2EPlan (HouseGAN++)",
+    "input": {
+        "boundary": {"width": 30, "depth": 50},
+        "unit": "feet"
+    },
+    "output": {
+        "rooms": [
+            {
+                "id": 1,
+                "type": "living_room",
+                "type_id": 1,
+                "bbox": {"x1": 0, "y1": 0, "x2": 20, "y2": 18},
+                "center": [10, 9],
+                "area_sqft": 360,
+                "polygon": [[0, 0], [20, 0], [20, 18], [0, 18]]
+            },
+            {
+                "id": 2,
+                "type": "kitchen",
+                "type_id": 3,
+                "bbox": {"x1": 20, "y1": 0, "x2": 30, "y2": 15},
+                "center": [25, 7.5],
+                "area_sqft": 150,
+                "polygon": [[20, 0], [30, 0], [30, 15], [20, 15]]
+            },
+            {
+                "id": 3,
+                "type": "dining_room",
+                "type_id": 4,
+                "bbox": {"x1": 20, "y1": 15, "x2": 30, "y2": 27},
+                "center": [25, 21],
+                "area_sqft": 120,
+                "polygon": [[20, 15], [30, 15], [30, 27], [20, 27]]
+            },
+            {
+                "id": 4,
+                "type": "master_bedroom",
+                "type_id": 2,
+                "bbox": {"x1": 0, "y1": 18, "x2": 15, "y2": 35},
+                "center": [7.5, 26.5],
+                "area_sqft": 255,
+                "polygon": [[0, 18], [15, 18], [15, 35], [0, 35]]
+            },
+            {
+                "id": 5,
+                "type": "bedroom",
+                "type_id": 2,
+                "bbox": {"x1": 15, "y1": 27, "x2": 30, "y2": 42},
+                "center": [22.5, 34.5],
+                "area_sqft": 225,
+                "polygon": [[15, 27], [30, 27], [30, 42], [15, 42]]
+            },
+            {
+                "id": 6,
+                "type": "bedroom",
+                "type_id": 2,
+                "bbox": {"x1": 0, "y1": 35, "x2": 15, "y2": 50},
+                "center": [7.5, 42.5],
+                "area_sqft": 225,
+                "polygon": [[0, 35], [15, 35], [15, 50], [0, 50]]
+            },
+            {
+                "id": 7,
+                "type": "bathroom",
+                "type_id": 5,
+                "bbox": {"x1": 15, "y1": 42, "x2": 24, "y2": 50},
+                "center": [19.5, 46],
+                "area_sqft": 72,
+                "polygon": [[15, 42], [24, 42], [24, 50], [15, 50]]
+            },
+            {
+                "id": 8,
+                "type": "bathroom",
+                "type_id": 5,
+                "bbox": {"x1": 15, "y1": 35, "x2": 24, "y2": 42},
+                "center": [19.5, 38.5],
+                "area_sqft": 63,
+                "polygon": [[15, 35], [24, 35], [24, 42], [15, 42]]
+            }
+        ],
+        "doors": [
+            {"from_room": 1, "to_room": 2, "position": [20, 9], "width": 3},
+            {"from_room": 1, "to_room": 4, "position": [7.5, 18], "width": 3},
+            {"from_room": 2, "to_room": 3, "position": [25, 15], "width": 3},
+            {"from_room": 3, "to_room": 5, "position": [22.5, 27], "width": 3},
+            {"from_room": 4, "to_room": 6, "position": [7.5, 35], "width": 3},
+            {"from_room": 5, "to_room": 7, "position": [19.5, 42], "width": 2.5},
+            {"from_room": 5, "to_room": 8, "position": [19.5, 35], "width": 2.5}
+        ],
+        "windows": [
+            {"room": 1, "wall": "south", "position": [10, 0]},
+            {"room": 2, "wall": "east", "position": [30, 7.5]},
+            {"room": 4, "wall": "west", "position": [0, 26.5]},
+            {"room": 5, "wall": "east", "position": [30, 34.5]},
+            {"room": 6, "wall": "west", "position": [0, 42.5]}
+        ]
+    },
+    "metrics": {
+        "generation_time_seconds": 1.8,
+        "total_area_sqft": 1470,
+        "efficiency": 0.98,
+        "room_count": 8,
+        "graph_error_rate": 0.05
+    },
+    "wall_coordinates": [
+        {"start": [0, 0], "end": [30, 0]},
+        {"start": [30, 0], "end": [30, 50]},
+        {"start": [30, 50], "end": [0, 50]},
+        {"start": [0, 50], "end": [0, 0]},
+        {"start": [20, 0], "end": [20, 18]},
+        {"start": [0, 18], "end": [20, 18]},
+        {"start": [20, 15], "end": [30, 15]},
+        {"start": [0, 35], "end": [15, 35]},
+        {"start": [15, 27], "end": [30, 27]},
+        {"start": [15, 42], "end": [24, 42]},
+        {"start": [15, 35], "end": [24, 35]}
+    ]
+}

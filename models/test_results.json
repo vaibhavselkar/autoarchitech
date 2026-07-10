@@ -1,0 +1,290 @@
+[
+  {
+    "model": "HouseDiffusion",
+    "timestamp": "2026-04-01T11:26:17.768499",
+    "plot_size": "30x50",
+    "generation_time": 2.3,
+    "scores": {
+      "vastu_compliance": 14.285714285714285,
+      "room_dimensions": 59.166666666666664,
+      "space_efficiency": 78.33333333333333,
+      "connectivity": 83.33333333333334,
+      "output_format": 70.0,
+      "overall": 60.33613445378151
+    },
+    "details": {
+      "vastu": {
+        "score": 15,
+        "max_score": 105,
+        "percentage": 14.285714285714285,
+        "details": [
+          "[PASS] living_room in northeast (correct)",
+          "[FAIL] kitchen in northwest (should be in ['southeast'])",
+          "[FAIL] master_bedroom in southeast (should be in ['southwest'])",
+          "[FAIL] bedroom in northwest (should be in ['south', 'west'])",
+          "[FAIL] bathroom in southeast (should be in ['west', 'northwest'])",
+          "[FAIL] bathroom in southwest (should be in ['west', 'northwest'])"
+        ]
+      },
+      "dimensions": {
+        "average_score": 0.5916666666666667,
+        "details": [
+          {
+            "room": "living_room",
+            "area": 300,
+            "status": "acceptable",
+            "score": 0.8,
+            "ideal": 250
+          },
+          {
+            "room": "kitchen",
+            "area": 225,
+            "status": "too_large",
+            "score": 0.5,
+            "ideal": 120
+          },
+          {
+            "room": "master_bedroom",
+            "area": 225,
+            "status": "acceptable",
+            "score": 0.75,
+            "ideal": 180
+          },
+          {
+            "room": "bedroom",
+            "area": 225,
+            "status": "too_large",
+            "score": 0.5,
+            "ideal": 150
+          },
+          {
+            "room": "bathroom",
+            "area": 100,
+            "status": "acceptable",
+            "score": 0.5,
+            "ideal": 60
+          },
+          {
+            "room": "bathroom",
+            "area": 100,
+            "status": "acceptable",
+            "score": 0.5,
+            "ideal": 60
+          }
+        ]
+      },
+      "efficiency": {
+        "total_room_area": 1175,
+        "plot_area": 1500,
+        "efficiency": 0.7833333333333333,
+        "score": 0.9215686274509804
+      },
+      "connectivity": {
+        "room_count": 6,
+        "door_count": 5,
+        "min_required_doors": 5,
+        "score": 0.8333333333333334
+      },
+      "format": {
+        "has_required_fields": false,
+        "missing_required": [
+          "wall_coordinates"
+        ],
+        "missing_optional": [],
+        "score": 0.7
+      }
+    }
+  },
+  {
+    "model": "CE2EPlan (HouseGAN++)",
+    "timestamp": "2026-04-01T11:26:17.776484",
+    "plot_size": "30x50",
+    "generation_time": 1.8,
+    "scores": {
+      "vastu_compliance": 23.809523809523807,
+      "room_dimensions": 53.22222222222223,
+      "space_efficiency": 87.2,
+      "connectivity": 83.33333333333334,
+      "output_format": 70.0,
+      "overall": 63.096825396825395
+    },
+    "details": {
+      "vastu": {
+        "score": 25,
+        "max_score": 105,
+        "percentage": 23.809523809523807,
+        "details": [
+          "[PASS] living_room in northeast (correct)",
+          "[FAIL] kitchen in northwest (should be in ['southeast'])",
+          "[FAIL] master_bedroom in southeast (should be in ['southwest'])",
+          "[PASS] bedroom in south (correct)",
+          "[FAIL] bathroom in southeast (should be in ['west', 'northwest'])",
+          "[FAIL] bathroom in southwest (should be in ['west', 'northwest'])"
+        ]
+      },
+      "dimensions": {
+        "average_score": 0.5322222222222223,
+        "details": [
+          {
+            "room": "living_room",
+            "area": 396,
+            "status": "acceptable",
+            "score": 0.5,
+            "ideal": 250
+          },
+          {
+            "room": "kitchen",
+            "area": 216,
+            "status": "too_large",
+            "score": 0.5,
+            "ideal": 120
+          },
+          {
+            "room": "master_bedroom",
+            "area": 256,
+            "status": "too_large",
+            "score": 0.5,
+            "ideal": 180
+          },
+          {
+            "room": "bedroom",
+            "area": 196,
+            "status": "acceptable",
+            "score": 0.6933333333333334,
+            "ideal": 150
+          },
+          {
+            "room": "bathroom",
+            "area": 144,
+            "status": "too_large",
+            "score": 0.5,
+            "ideal": 60
+          },
+          {
+            "room": "bathroom",
+            "area": 100,
+            "status": "acceptable",
+            "score": 0.5,
+            "ideal": 60
+          }
+        ]
+      },
+      "efficiency": {
+        "total_room_area": 1308,
+        "plot_area": 1500,
+        "efficiency": 0.872,
+        "score": 1.0
+      },
+      "connectivity": {
+        "room_count": 6,
+        "door_count": 5,
+        "min_required_doors": 5,
+        "score": 0.8333333333333334
+      },
+      "format": {
+        "has_required_fields": false,
+        "missing_required": [
+          "wall_coordinates"
+        ],
+        "missing_optional": [],
+        "score": 0.7
+      }
+    }
+  },
+  {
+    "model": "Graph2Plan",
+    "timestamp": "2026-04-01T11:26:17.779476",
+    "plot_size": "30x50",
+    "generation_time": 3.2,
+    "scores": {
+      "vastu_compliance": 14.285714285714285,
+      "room_dimensions": 57.925925925925924,
+      "space_efficiency": 79.46666666666667,
+      "connectivity": 83.33333333333334,
+      "output_format": 70.0,
+      "overall": 60.35465297230004
+    },
+    "details": {
+      "vastu": {
+        "score": 15,
+        "max_score": 105,
+        "percentage": 14.285714285714285,
+        "details": [
+          "[PASS] living_room in northeast (correct)",
+          "[FAIL] kitchen in northwest (should be in ['southeast'])",
+          "[FAIL] master_bedroom in southeast (should be in ['southwest'])",
+          "[FAIL] bedroom in northwest (should be in ['south', 'west'])",
+          "[FAIL] bathroom in southeast (should be in ['west', 'northwest'])",
+          "[FAIL] bathroom in southwest (should be in ['west', 'northwest'])"
+        ]
+      },
+      "dimensions": {
+        "average_score": 0.5792592592592593,
+        "details": [
+          {
+            "room": "living_room",
+            "area": 320,
+            "status": "acceptable",
+            "score": 0.72,
+            "ideal": 250
+          },
+          {
+            "room": "kitchen",
+            "area": 224,
+            "status": "too_large",
+            "score": 0.5,
+            "ideal": 120
+          },
+          {
+            "room": "master_bedroom",
+            "area": 224,
+            "status": "acceptable",
+            "score": 0.7555555555555555,
+            "ideal": 180
+          },
+          {
+            "room": "bedroom",
+            "area": 224,
+            "status": "too_large",
+            "score": 0.5,
+            "ideal": 150
+          },
+          {
+            "room": "bathroom",
+            "area": 100,
+            "status": "acceptable",
+            "score": 0.5,
+            "ideal": 60
+          },
+          {
+            "room": "bathroom",
+            "area": 100,
+            "status": "acceptable",
+            "score": 0.5,
+            "ideal": 60
+          }
+        ]
+      },
+      "efficiency": {
+        "total_room_area": 1192,
+        "plot_area": 1500,
+        "efficiency": 0.7946666666666666,
+        "score": 0.9349019607843138
+      },
+      "connectivity": {
+        "room_count": 6,
+        "door_count": 5,
+        "min_required_doors": 5,
+        "score": 0.8333333333333334
+      },
+      "format": {
+        "has_required_fields": false,
+        "missing_required": [
+          "wall_coordinates"
+        ],
+        "missing_optional": [],
+        "score": 0.7
+      }
+    }
+  }
+]
