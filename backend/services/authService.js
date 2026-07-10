@@ -8,7 +8,7 @@ const axios = require('axios');
  */
 class AuthService {
   constructor() {
-    this.jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
+    this.jwtSecret = process.env.JWT_SECRET;
     this.googleClientId = process.env.GOOGLE_CLIENT_ID;
     this.googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
     this.googleRedirectUri = process.env.GOOGLE_REDIRECT_URI;

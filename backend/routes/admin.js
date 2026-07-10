@@ -1,24 +1,10 @@
 'use strict';
 const express    = require('express');
-const jwt        = require('jsonwebtoken');
 const User       = require('../models/User');
 const DesignRule = require('../models/DesignRule');
+const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'Banayengakyaghartoiskojaldistemaalkr';
-
-// ── Auth middleware ──────────────────────────────────────────────────────────
-const authMiddleware = async (req, res, next) => {
-  try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) return res.status(401).json({ success: false, message: 'No token' });
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.userId   = decoded.userId;
-    next();
-  } catch {
-    res.status(401).json({ success: false, message: 'Invalid token' });
-  }
-};
 
 // ── Admin-only middleware ────────────────────────────────────────────────────
 const adminMiddleware = async (req, res, next) => {

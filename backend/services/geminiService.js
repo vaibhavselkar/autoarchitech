@@ -9,6 +9,8 @@ const { planUtils } = require('../../shared/plan-schema');
  *   The layoutGenerator uses these coordinates directly.
  *   Rule-based fallback only when Gemini fails or produces invalid output.
  */
+const GEMINI_TIMEOUT_MS = 20000;
+
 class GeminiService {
   constructor() {
     this.apiKey = process.env.GEMINI_API_KEY;
@@ -22,6 +24,17 @@ class GeminiService {
 
   isConfigured() {
     return !!this.apiKey && !!this.genAI;
+  }
+
+  // Bounds every Gemini call so a slow/hanging request doesn't hold the
+  // caller's HTTP request open indefinitely.
+  _generateContent(prompt) {
+    return Promise.race([
+      this.model.generateContent(prompt),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Gemini request timed out')), GEMINI_TIMEOUT_MS)
+      ),
+    ]);
   }
 
   // ─── PRIMARY: AI generates complete room placements ───────────────────────
@@ -141,7 +154,7 @@ VALID room type names: balcony, living_room, dining, kitchen, master_bedroom, be
 Generate exactly ${count} variation objects now. Each variation must have a GENUINELY DIFFERENT spatial arrangement from the example and from each other:`;
 
     try {
-      const result = await this.model.generateContent(prompt);
+      const result = await this._generateContent(prompt);
       const text   = result.response.text();
       const parsed = this.extractJSON(text);
 
@@ -193,7 +206,7 @@ Bathroom min: width≥6, height≥8. No aspect ratio > 1.7.
 Generate ${count} objects:`;
 
     try {
-      const result = await this.model.generateContent(prompt);
+      const result = await this._generateContent(prompt);
       const text   = result.response.text();
       const params = this.extractJSON(text);
       if (!Array.isArray(params) || params.length === 0) return null;
@@ -215,7 +228,7 @@ Space utilisation: ${planUtils.calculateUtilization(layout).toFixed(1)}%
 Requirements: ${JSON.stringify(requirements)}
 List up to 5 specific, actionable improvements.`;
     try {
-      const result = await this.model.generateContent(prompt);
+      const result = await this._generateContent(prompt);
       return { ...layout, metadata: { ...layout.metadata, geminiEnhanced: true, geminiSuggestions: result.response.text() } };
     } catch (err) {
       return layout;
@@ -233,7 +246,7 @@ Strengths: [bullets]
 Weaknesses: [bullets]
 Recommendations: [bullets]`;
     try {
-      const result = await this.model.generateContent(prompt);
+      const result = await this._generateContent(prompt);
       return this._parseQualityAnalysis(result.response.text(), layout);
     } catch (err) {
       return this.getBasicAnalysis(layout);
@@ -399,7 +412,7 @@ Return ONLY the fixed rooms as a raw JSON array — no markdown, no text:
 [{"type":"...","x":...,"y":...,"width":...,"height":...}, ...]`;
 
     try {
-      const result = await this.model.generateContent(prompt);
+      const result = await this._generateContent(prompt);
       const text   = result.response.text();
       const parsed = this.extractJSONArray(text);
       if (!Array.isArray(parsed) || parsed.length === 0) return null;

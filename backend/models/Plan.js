@@ -45,7 +45,8 @@ const planSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: true,
+    index: true
   },
   plotId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -86,5 +87,8 @@ planSchema.pre('save', function(next) {
   this.updatedAt = new Date();
   next();
 });
+
+// Matches the { userId, sort: createdAt } query pattern used by GET /api/plans
+planSchema.index({ userId: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Plan', planSchema);

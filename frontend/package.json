@@ -2,6 +2,9 @@
   "name": "autoarchitect-frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "@headlessui/react": "^1.7.3",
     "@react-oauth/google": "^0.13.4",
