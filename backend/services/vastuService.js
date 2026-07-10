@@ -35,8 +35,28 @@ class VastuService {
         kitchen_stove: ['east', 'north'],
         bed_direction: ['south', 'west'],
         study_desk: ['east', 'north']
-      }
+      },
+
+      // Directions where a room type must never be placed (hard Vastu prohibitions)
+      forbiddenDirections: {
+        bathroom: ['northeast'],
+        toilet: ['northeast', 'center'],
+        kitchen: ['northeast', 'center'],
+        prayer_room: ['southwest'],
+      },
     };
+
+    // Relative importance of each room type when placement is wrong —
+    // a misplaced kitchen or master bedroom matters far more than a misplaced balcony.
+    this.roomWeights = {
+      kitchen: 3, master_bedroom: 3, main_entrance: 3,
+      prayer_room: 2, living_room: 2, bathroom: 2, toilet: 2,
+      dining: 1, study: 1, staircase: 1, garage: 1,
+    };
+  }
+
+  weightFor(type) {
+    return this.roomWeights[type] || 1;
   }
 
   /**
@@ -50,18 +70,42 @@ class VastuService {
       recommendations: []
     };
 
+    let earnedWeight = 0;
+    let totalWeight  = 0;
+
     // Analyze room directions
     layout.rooms.forEach(room => {
       const roomDirection = this.getRoomDirection(room, layout.plot);
       const auspiciousDirections = this.vastuRules.roomDirections[room.type] || [];
-      
-      if (auspiciousDirections.includes(roomDirection)) {
+      const forbiddenDirections  = this.vastuRules.forbiddenDirections[room.type] || [];
+      const weight = this.weightFor(room.type);
+      const isForbidden = forbiddenDirections.includes(roomDirection);
+
+      totalWeight += weight;
+
+      if (isForbidden) {
+        // Hard prohibition (e.g. bathroom/kitchen in the northeast, or on the
+        // brahmasthan/center) — counts as a full violation regardless of the
+        // general auspicious-direction list.
+        analysis.violations.push({
+          room: room.label,
+          currentDirection: roomDirection,
+          recommendedDirections: auspiciousDirections,
+          issue: `${room.label} in ${roomDirection} violates a core Vastu prohibition`,
+          severity: 'critical',
+        });
+        analysis.recommendations.push({
+          room: room.label,
+          recommendation: `${room.label} must NOT be placed in the ${roomDirection} — move it away from this zone entirely`
+        });
+      } else if (auspiciousDirections.includes(roomDirection)) {
         analysis.compliance.push({
           room: room.label,
           direction: roomDirection,
           status: 'compliant',
           message: `${room.label} in ${roomDirection} is auspicious`
         });
+        earnedWeight += weight;
       } else {
         analysis.violations.push({
           room: room.label,
@@ -69,18 +113,21 @@ class VastuService {
           recommendedDirections: auspiciousDirections,
           issue: `${room.label} in ${roomDirection} is not ideal per Vastu`
         });
-        
         analysis.recommendations.push({
           room: room.label,
           recommendation: `Consider placing ${room.label} in ${auspiciousDirections.join(' or ')} direction`
         });
+        // Partial credit — wrong quadrant but not a hard prohibition
+        earnedWeight += weight * 0.3;
       }
     });
 
     // Analyze main entrance
     const entranceDirection = this.getEntranceDirection(layout);
     const auspiciousEntrances = this.vastuRules.auspiciousDirections.main_entrance;
-    
+    const entranceWeight = this.weightFor('main_entrance');
+    totalWeight += entranceWeight;
+
     if (auspiciousEntrances.includes(entranceDirection)) {
       analysis.compliance.push({
         room: 'Main Entrance',
@@ -88,6 +135,7 @@ class VastuService {
         status: 'compliant',
         message: `Main entrance facing ${entranceDirection} is auspicious`
       });
+      earnedWeight += entranceWeight;
     } else {
       analysis.violations.push({
         room: 'Main Entrance',
@@ -95,23 +143,54 @@ class VastuService {
         recommendedDirections: auspiciousEntrances,
         issue: `Main entrance facing ${entranceDirection} is not ideal`
       });
-      
       analysis.recommendations.push({
         room: 'Main Entrance',
         recommendation: `Consider main entrance in ${auspiciousEntrances.join(' or ')} direction`
       });
+      earnedWeight += entranceWeight * 0.3;
     }
 
-    // Calculate overall score
-    const totalItems = analysis.compliance.length + analysis.violations.length;
-    const complianceRate = totalItems > 0 ? (analysis.compliance.length / totalItems) * 100 : 100;
-    analysis.overallScore = Math.round(complianceRate);
+    // Brahmasthan check — the plot's center should remain open/unoccupied
+    const centerOccupants = layout.rooms.filter(room => this.getRoomDirection(room, layout.plot) === 'center');
+    if (centerOccupants.length > 0) {
+      analysis.violations.push({
+        room: 'Brahmasthan (plot center)',
+        currentDirection: 'center',
+        recommendedDirections: [],
+        issue: `${centerOccupants.map(r => r.label).join(', ')} occupies the plot's center — the brahmasthan should stay open`,
+        severity: 'critical',
+      });
+      analysis.recommendations.push({
+        room: 'Brahmasthan',
+        recommendation: 'Keep the central zone of the plot free of walls and heavy rooms (courtyard, open hall, or skylight is ideal)'
+      });
+    }
+
+    // Calculate weighted overall score
+    analysis.overallScore = totalWeight > 0 ? Math.round((earnedWeight / totalWeight) * 100) : 100;
 
     return analysis;
   }
 
   /**
-   * Get the direction of a room based on its position
+   * Rotate a room's local (x, y) offset from plot center into true compass
+   * offsets (east, south), based on which side the plot's front/road faces.
+   * Local coordinates always have y=0 as the front/road side and x=0 as the
+   * left edge — this only matches true north/south/east/west when facing='north'.
+   */
+  _toCompassOffset(xDiff, yDiff, facing) {
+    switch ((facing || 'north').toLowerCase()) {
+      case 'south': return { east: -xDiff, south: -yDiff };
+      case 'east':  return { east: -yDiff, south:  xDiff };
+      case 'west':  return { east:  yDiff, south: -xDiff };
+      case 'north':
+      default:      return { east:  xDiff, south:  yDiff };
+    }
+  }
+
+  /**
+   * Get the true compass direction of a room based on its position and the
+   * plot's facing (road side).
    */
   getRoomDirection(room, plot) {
     const centerX = plot.width / 2;
@@ -119,18 +198,20 @@ class VastuService {
     const roomCenterX = room.x + room.width / 2;
     const roomCenterY = room.y + room.height / 2;
 
-    const xDiff = roomCenterX - centerX;
-    const yDiff = roomCenterY - centerY;
+    const { east, south } = this._toCompassOffset(roomCenterX - centerX, roomCenterY - centerY, plot.facing);
 
-    // Determine quadrant
-    if (xDiff >= 0 && yDiff >= 0) return 'southeast';
-    if (xDiff <= 0 && yDiff >= 0) return 'southwest';
-    if (xDiff <= 0 && yDiff <= 0) return 'northwest';
-    if (xDiff >= 0 && yDiff <= 0) return 'northeast';
+    // Near-center rooms belong to the brahmasthan, not a directional quadrant
+    const nearCenterX = Math.abs(east)  < plot.width  * 0.08;
+    const nearCenterY = Math.abs(south) < plot.length * 0.08;
+    if (nearCenterX && nearCenterY) return 'center';
 
-    // If on axes
-    if (xDiff === 0) return yDiff >= 0 ? 'south' : 'north';
-    if (yDiff === 0) return xDiff >= 0 ? 'east' : 'west';
+    if (east >= 0 && south >= 0) return 'southeast';
+    if (east <= 0 && south >= 0) return 'southwest';
+    if (east <= 0 && south <= 0) return 'northwest';
+    if (east >= 0 && south <= 0) return 'northeast';
+
+    if (east === 0) return south >= 0 ? 'south' : 'north';
+    if (south === 0) return east >= 0 ? 'east' : 'west';
 
     return 'center';
   }

@@ -14,9 +14,10 @@
  */
 
 const { validatePlan: schemaValidatePlan } = require('../../shared/plan-schema');
-const { validatePlan }                     = require('./planValidator');
+const { validatePlan, PASS_SCORE }          = require('./planValidator');
 const { autoFix }                          = require('./planAutoFixer');
 const geminiService                        = require('./geminiService');
+const vastuService                         = require('./vastuService');
 
 // ─── Hard limits (also used by fallback generator) ───────────────────────────
 
@@ -101,21 +102,21 @@ async function generateLayout(plot, requirements, preferences = {}) {
 
 async function generateLayoutVariations(plot, requirements, preferences = {}, variations = 5) {
   const plotData  = parsePlot(plot);
-  const req       = parseRequirements(requirements);
   const prefs     = parsePreferences(preferences);
   const buildable = getBuildable(plotData);
+  const req       = fitRequirementsToBuildable(parseRequirements(requirements), buildable);
 
   // ── AI generates plans, fallback to rule-based if AI fails ──────────────
   let aiLayouts = null;
   try {
-    aiLayouts = await geminiService.generateRoomPlacements(plot, requirements, preferences, variations);
+    aiLayouts = await geminiService.generateRoomPlacements(plot, req, preferences, variations);
   } catch (err) {
     console.warn(`AI plan generation failed (${err.message}) — will use fallback`);
   }
 
   if (!aiLayouts || aiLayouts.length === 0) {
     console.warn('AI returned no plans — using rule-based fallback layouts');
-    return generateFallbackLayouts(plotData, prefs, buildable, req, variations);
+    return attachCapacityWarning(generateFallbackLayouts(plotData, prefs, buildable, req, variations), req);
   }
 
   const results = [];
@@ -141,10 +142,17 @@ async function generateLayoutVariations(plot, requirements, preferences = {}, va
 
   if (results.length === 0) {
     console.warn('All AI variations failed — using rule-based fallback layouts');
-    return generateFallbackLayouts(plotData, prefs, buildable, req, variations);
+    return attachCapacityWarning(generateFallbackLayouts(plotData, prefs, buildable, req, variations), req);
   }
 
-  return results;
+  return attachCapacityWarning(results, req);
+}
+
+function attachCapacityWarning(layouts, req) {
+  if (req._capacityWarning) {
+    layouts.forEach(layout => { layout.metadata.capacityWarning = req._capacityWarning; });
+  }
+  return layouts;
 }
 
 // ─── Smart validator-aware builders ──────────────────────────────────────────
@@ -802,9 +810,9 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
   const { TYPE_TO_FRONTEND }                     = require('../src/knowledge/physicalRules');
 
   const plotData  = parsePlot(plot);
-  const req       = parseRequirements(requirements);
   const prefs     = parsePreferences(preferences);
   const buildable = getBuildable(plotData);
+  const req       = fitRequirementsToBuildable(parseRequirements(requirements), buildable);
   const W = buildable.width, H = buildable.length;
 
   // All 6 builders — each produces a visually distinct layout
@@ -1125,7 +1133,7 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
 
     // ── D2: If Gemini output scored < 80, fall back to THIS plan's assigned smart builder.
     //       NEVER swap to another plan's style — that causes all 3 plans to look identical.
-    if ((layout.validation?.score ?? 0) < 80) {
+    if ((layout.validation?.score ?? 0) < PASS_SCORE) {
       const smartRooms = BUILDERS[style]();
       resolveOverlaps(smartRooms, buildable);
       trimOverlaps(smartRooms, buildable);
@@ -1144,7 +1152,7 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
     }
 
     // ── D3: autoFix pass — last-resort boost if still below 80 ──
-    if ((layout.validation?.score ?? 0) < 80) {
+    if ((layout.validation?.score ?? 0) < PASS_SCORE) {
       const errs = layout.validation?.errors || [];
       if (errs.length > 0) {
         const fixed = autoFix(layout, errs);
@@ -1219,11 +1227,43 @@ async function generateLayoutVariationsStream(plot, requirements, preferences = 
       }
     }
 
+    if (req._capacityWarning) layout.metadata.capacityWarning = req._capacityWarning;
     await onPlanReady(layout, i, 0);
   }
 }
 
 // ─── Rule-based fallback: always produces valid layouts ───────────────────────
+
+// Mirrors rooms left-right within the buildable width (front/back untouched).
+function mirrorRoomsX(rooms, W) {
+  return rooms.map(r => ({ ...r, x: r2(W - r.x - r.width) }));
+}
+
+// The smart builders place kitchen/bathroom/bedroom corners assuming a
+// north-facing plot. For other facings the true compass quadrant those local
+// corners land in shifts (see vastuService._toCompassOffset) — sometimes
+// straight into a forbidden zone (e.g. bathroom/kitchen in the northeast).
+// Front/back (road side) must stay fixed for practical entry reasons, so the
+// only safe degree of freedom is a left-right mirror. Try both and keep
+// whichever has better Vastu compliance, as long as it doesn't cost validator score.
+function buildBestOriented(plotData, prefs, buildable, rawRooms, aiMeta, index) {
+  const normal = buildVariationFromAIRooms(plotData, prefs, buildable, { rooms: rawRooms, ...aiMeta }, index);
+  const facing = (plotData.facing || 'north').toLowerCase();
+  if (facing === 'north') return normal; // builders are already tuned for north-facing
+
+  const mirroredRooms = mirrorRoomsX(rawRooms, buildable.width);
+  const mirrored = buildVariationFromAIRooms(plotData, prefs, buildable, { rooms: mirroredRooms, ...aiMeta }, index);
+
+  const normalVastu   = vastuService.analyzeVastuCompliance(normal).overallScore;
+  const mirroredVastu = vastuService.analyzeVastuCompliance(mirrored).overallScore;
+  const normalScore   = normal.validation?.score ?? 0;
+  const mirroredScore = mirrored.validation?.score ?? 0;
+
+  // Never trade away validator quality for Vastu — only prefer the mirror
+  // when it doesn't regress the hard-rule score.
+  if (mirroredScore >= normalScore && mirroredVastu > normalVastu) return mirrored;
+  return normal;
+}
 
 function generateFallbackLayouts(plotData, prefs, buildable, req, count) {
   const W = buildable.width, H = buildable.length;
@@ -1246,24 +1286,23 @@ function generateFallbackLayouts(plotData, prefs, buildable, req, count) {
     resolveOverlaps(rooms, buildable);
     trimOverlaps(rooms, buildable);
     fillGaps(rooms, buildable);
-    const aiData = {
-      rooms,
+    const aiMeta = {
       designTheme: themes[i],
       layoutStyle: styles[i],
       description: `Fallback ${styles[i]} plan`,
     };
-    let layout = buildVariationFromAIRooms(plotData, prefs, buildable, aiData, i);
+    let layout = buildBestOriented(plotData, prefs, buildable, rooms, aiMeta, i);
 
     // Guarantee ≥80 — try other builders if this one scored poorly
-    if ((layout.validation?.score ?? 0) < 80) {
+    if ((layout.validation?.score ?? 0) < PASS_SCORE) {
       for (let j = 0; j < layoutBuilders.length; j++) {
         if (j === i) continue;
         const fbRooms = layoutBuilders[j]();
         resolveOverlaps(fbRooms, buildable);
         trimOverlaps(fbRooms, buildable);
         fillGaps(fbRooms, buildable);
-        const fbLayout = buildVariationFromAIRooms(plotData, prefs, buildable, {
-          rooms: fbRooms, designTheme: themes[j], layoutStyle: styles[j],
+        const fbLayout = buildBestOriented(plotData, prefs, buildable, fbRooms, {
+          designTheme: themes[j], layoutStyle: styles[j],
           description: `Fallback ${styles[j]} plan`,
         }, i);
         if ((fbLayout.validation?.score ?? 0) > (layout.validation?.score ?? 0)) {
@@ -1750,6 +1789,49 @@ function parsePreferences(prefs = {}) {
     style:      prefs.style      || 'modern',
     customIdea: prefs.customIdea || '',
   };
+}
+
+// Small Indian urban plots (e.g. 20x30, 25x40 ft) often can't fit a full
+// 3BR/2BA program at NBC-minimum room sizes on a single floor. Rather than
+// silently generating a plan that fails every size check, shrink the room
+// count to what actually fits and attach a warning recommending a multi-floor
+// (G+1/G+2) build for the full program.
+function fitRequirementsToBuildable(req, buildable) {
+  const area = buildable.width * buildable.length;
+  const sqft = (type) => ROOM_MIN[type] ? ROOM_MIN[type].w * ROOM_MIN[type].h : 0;
+
+  const fixedArea = (req.living_room ? sqft('living_room') : 0)
+    + (req.dining ? sqft('dining') : 0)
+    + (req.kitchen ? sqft('kitchen') : 0)
+    + (req.balcony ? sqft('balcony') : 0)
+    + (req.study ? sqft('study') : 0)
+    + (req.prayer_room ? sqft('prayer_room') : 0)
+    + (req.guest_room || 0) * sqft('guest_room')
+    + (req.utility_room || 0) * sqft('utility_room');
+
+  const USABLE_FRACTION = 0.90; // leave room for corridors/circulation
+  const usableArea = area * USABLE_FRACTION;
+
+  let bedrooms  = Math.max(1, req.bedrooms);
+  let bathrooms = Math.max(1, req.bathrooms);
+  const originalBedrooms = bedrooms, originalBathrooms = bathrooms;
+
+  const totalArea = () => fixedArea
+    + sqft('master_bedroom') + Math.max(0, bedrooms - 1) * sqft('bedroom')
+    + bathrooms * sqft('bathroom');
+
+  // Shrink bathrooms first (cheaper to lose), then bedrooms, until the program fits.
+  while (totalArea() > usableArea && bathrooms > 1) bathrooms--;
+  while (totalArea() > usableArea && bedrooms > 1) bedrooms--;
+
+  let capacityWarning = null;
+  if (bedrooms !== originalBedrooms || bathrooms !== originalBathrooms) {
+    capacityWarning = `Requested ${originalBedrooms}BR/${originalBathrooms}bath doesn't fit this plot at code-minimum room sizes — reduced to ${bedrooms}BR/${bathrooms}bath for this floor. Consider a G+1 (multi-floor) build to fit the full program.`;
+  } else if (totalArea() > usableArea) {
+    capacityWarning = 'This room program is tight for the plot size even at code-minimum sizes — consider a multi-floor (G+1) build.';
+  }
+
+  return { ...req, bedrooms, bathrooms, _capacityWarning: capacityWarning };
 }
 
 function getBuildable(plotData) {

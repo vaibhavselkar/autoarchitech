@@ -31,6 +31,11 @@ const ROOM_MIN_DIM = {
   balcony:        { w:  5, h:  4 },
 };
 
+// Single source of truth for the "is this plan good enough to show/save" bar.
+// layoutGenerator.js's Gemini-vs-fallback comparison uses this same constant
+// so the two places that decide "is this plan good" can't drift out of sync.
+const PASS_SCORE = 80;
+
 function lbl(type) { return ROOM_LABEL[type] || type; }
 
 // Check whether two rooms share a wall edge (within TOL feet)
@@ -216,7 +221,7 @@ function validatePlan(layout) {
   score = Math.max(0, Math.min(100, score));
 
   return {
-    isValid:      errors.length === 0,
+    isValid:      errors.length === 0 && score >= PASS_SCORE,
     errors,
     warnings,
     score,
@@ -226,4 +231,4 @@ function validatePlan(layout) {
   };
 }
 
-module.exports = { validatePlan };
+module.exports = { validatePlan, PASS_SCORE };
